@@ -1,4 +1,4 @@
-# Portfolio Knowledge Graph Remake
+# Portfolio Knowledge Graph
 
 Fresh rebuild from the ground up using:
 
