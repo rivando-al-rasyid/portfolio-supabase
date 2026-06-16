@@ -4,7 +4,7 @@ import { ArrowLeft } from 'lucide-react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { getBlogPostBySlug } from '../../lib/contentService';
-import { formatDate, getCanonicalUrl } from '../../lib/utils';
+import { formatDate, generateSeoDescription, generateSeoTitle, getCanonicalUrl } from '../../lib/utils';
 import { renderMarkdown } from '../../lib/markdown';
 import { ShareButton } from '../share/ShareButton';
 import { SEO } from '../seo/SEO';
@@ -32,7 +32,7 @@ export function BlogDetailPage() {
 
   return (
     <>
-      <SEO title={post.meta_title || post.title} description={post.meta_description || post.excerpt} image={post.cover_image} path={`/blog/${post.slug}`} type="article" />
+      <SEO title={post.meta_title || generateSeoTitle(post.title)} description={post.meta_description || generateSeoDescription({ description: post.excerpt, content: post.content })} image={post.cover_image} path={`/blog/${post.slug}`} type="article" />
       <article className="mx-auto max-w-3xl px-4 py-10">
         <Button asChild variant="ghost" className="mb-6 -ml-3">
           <Link to="/blog">

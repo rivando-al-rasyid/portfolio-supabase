@@ -113,6 +113,7 @@ create table if not exists social_share_queue (
   scheduled_at timestamptz not null default now(),
   sent_at timestamptz,
   error_message text,
+  attempts integer not null default 0,
   created_at timestamptz not null default now()
 );
 

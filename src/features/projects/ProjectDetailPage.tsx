@@ -4,7 +4,7 @@ import { ArrowLeft, ExternalLink, GitBranch } from 'lucide-react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { getProjectBySlug } from '../../lib/contentService';
-import { getCanonicalUrl } from '../../lib/utils';
+import { generateSeoDescription, generateSeoTitle, getCanonicalUrl } from '../../lib/utils';
 import { renderMarkdown } from '../../lib/markdown';
 import { ShareButton } from '../share/ShareButton';
 import { SEO } from '../seo/SEO';
@@ -32,7 +32,7 @@ export function ProjectDetailPage() {
 
   return (
     <>
-      <SEO title={project.meta_title || project.title} description={project.meta_description || project.summary} image={project.image_url} path={`/projects/${project.slug}`} type="article" />
+      <SEO title={project.meta_title || generateSeoTitle(project.title)} description={project.meta_description || generateSeoDescription({ description: project.summary, content: project.content })} image={project.image_url} path={`/projects/${project.slug}`} type="article" />
       <article className="mx-auto max-w-3xl px-4 py-10">
         <Button asChild variant="ghost" className="mb-6 -ml-3">
           <Link to="/projects">

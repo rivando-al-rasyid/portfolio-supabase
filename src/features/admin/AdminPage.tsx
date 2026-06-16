@@ -33,7 +33,7 @@ import {
 } from '../../lib/contentService';
 import { formatBytes } from '../../lib/imageCompression';
 import { compressAndUploadImage } from '../../lib/mediaService';
-import { getCanonicalUrl, makeUniqueSlug, toSlug, truncateText } from '../../lib/utils';
+import { generateSeoDescription, generateSeoTitle, getCanonicalUrl, makeUniqueSlug, toSlug, truncateText } from '../../lib/utils';
 import { useAuth } from '../auth/AuthProvider';
 import { SEO } from '../seo/SEO';
 import type { BlogPost, EntityType, Project, SharePlatform, SiteSettings, Topic } from '../../types/content';
@@ -239,8 +239,8 @@ export function AdminPage() {
           status: state.status,
           is_featured: state.isFeatured,
           sort_order: Number.isFinite(state.sortOrder) ? state.sortOrder : 100,
-          meta_title: state.metaTitle || null,
-          meta_description: state.metaDescription || null,
+          meta_title: generateSeoTitle(state.title),
+          meta_description: generateSeoDescription({ description: state.description, content: state.content }),
           published_at: state.status === 'published' ? new Date().toISOString() : null
         };
         const saved = state.id ? await updateBlogPost(state.id, payload) : await createBlogPost(payload);
@@ -252,7 +252,7 @@ export function AdminPage() {
             platforms: shareSettings.active_platforms,
             payload: {
               title: saved.title,
-              description: saved.excerpt,
+              description: generateSeoDescription({ description: saved.excerpt, content: saved.content }),
               url: getCanonicalUrl(`/blog/${saved.slug}`),
               type: 'blog'
             }
@@ -272,8 +272,8 @@ export function AdminPage() {
         status: state.status,
         is_featured: state.isFeatured,
         sort_order: Number.isFinite(state.sortOrder) ? state.sortOrder : 100,
-        meta_title: state.metaTitle || null,
-        meta_description: state.metaDescription || null
+        meta_title: generateSeoTitle(state.title),
+        meta_description: generateSeoDescription({ description: state.description, content: state.content })
       };
       const saved = state.id ? await updateProject(state.id, payload) : await createProject(payload);
       await replaceProjectTopics(saved.id, state.topicIds);
@@ -284,7 +284,7 @@ export function AdminPage() {
           platforms: shareSettings.active_platforms,
           payload: {
             title: saved.title,
-            description: saved.summary,
+            description: generateSeoDescription({ description: saved.summary, content: saved.content }),
             url: getCanonicalUrl(`/projects/${saved.slug}`),
             type: 'project'
           }
@@ -344,6 +344,14 @@ export function AdminPage() {
   const totalPublished = useMemo(
     () => posts.filter((post) => post.status === 'published').length + projects.filter((project) => project.status === 'published').length,
     [posts, projects]
+  );
+
+  const seoPreview = useMemo(
+    () => ({
+      title: generateSeoTitle(editor.title),
+      description: generateSeoDescription({ description: editor.description, content: editor.content })
+    }),
+    [editor.title, editor.description, editor.content]
   );
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -637,14 +645,14 @@ export function AdminPage() {
                         ) : null}
                       </div>
 
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">SEO title</label>
-                          <Input value={editor.metaTitle} onChange={(event) => setEditor({ ...editor, metaTitle: event.target.value })} />
+                      <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+                        <div>
+                          <label className="text-sm font-medium">Automatic SEO preview</label>
+                          <p className="text-xs text-muted-foreground">SEO title and description are generated from the title, description/excerpt, and CMS content when you save.</p>
                         </div>
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">SEO description</label>
-                          <Input value={editor.metaDescription} onChange={(event) => setEditor({ ...editor, metaDescription: event.target.value })} />
+                        <div className="space-y-1 rounded-md bg-background p-3 text-sm">
+                          <p className="font-semibold text-primary">{seoPreview.title}</p>
+                          <p className="text-muted-foreground">{seoPreview.description}</p>
                         </div>
                       </div>
 
@@ -691,9 +699,16 @@ export function AdminPage() {
           <Card>
             <CardHeader>
               <CardTitle>Share settings</CardTitle>
-              <CardDescription>These settings control manual share jobs inserted when new content is published.</CardDescription>
+              <CardDescription>Queue share jobs when content is published and see what is still required for real auto-posting.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              <Alert>
+                <AlertTitle>What is needed for true auto-share?</AlertTitle>
+                <AlertDescription>
+                  This CMS can queue share jobs, but real automatic posting needs a backend worker or Supabase Edge Function with private API credentials.
+                  Do not put LinkedIn, X, Facebook, SMTP, or Telegram secrets in Vite frontend env variables. See docs/social-auto-share-requirements.md.
+                </AlertDescription>
+              </Alert>
               <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
                 <div>
                   <h3 className="font-medium">Auto queue share jobs on publish</h3>

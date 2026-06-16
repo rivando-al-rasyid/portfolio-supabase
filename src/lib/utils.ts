@@ -19,6 +19,44 @@ export function truncateText(value: string | null | undefined, max = 140) {
   return value.length > max ? `${value.slice(0, max).trim()}…` : value;
 }
 
+export function normalizeWhitespace(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+export function stripMarkdown(value: string | null | undefined) {
+  if (!value) return '';
+
+  return normalizeWhitespace(
+    value
+      // Remove custom embed directives but keep the URL text out of the SEO description.
+      .replace(/^::(youtube|audio)\s+.*$/gim, '')
+      // Keep image alt text, remove image URL.
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+      // Keep link text, remove link URL.
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      // Remove fenced and inline code markers.
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`([^`]+)`/g, '$1')
+      // Remove common Markdown marks.
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/^>\s?/gm, '')
+      .replace(/^[-*+]\s+/gm, '')
+      .replace(/^\d+\.\s+/gm, '')
+      .replace(/[\*_~|]/g, '')
+      .replace(/<[^>]+>/g, '')
+  );
+}
+
+export function generateSeoTitle(title: string, maxLength = 60) {
+  const cleanTitle = normalizeWhitespace(title || 'Untitled');
+  return truncateText(cleanTitle, maxLength);
+}
+
+export function generateSeoDescription(input: { description?: string | null; content?: string | null }, maxLength = 155) {
+  const source = stripMarkdown(input.description) || stripMarkdown(input.content) || 'Read this portfolio content.';
+  return truncateText(source, maxLength);
+}
+
 export function toSlug(value: string) {
   return value
     .normalize('NFKD')
