@@ -1,4 +1,5 @@
 export type PublishStatus = 'draft' | 'published';
+export type ContentSource = 'manual' | 'github_readme' | 'markdown_url';
 export type EntityType = 'blog' | 'project' | 'topic';
 export type SharePlatform = 'linkedin' | 'x' | 'facebook' | 'whatsapp' | 'telegram' | 'email';
 
@@ -17,6 +18,8 @@ export interface BlogPost {
   slug: string;
   excerpt: string | null;
   content: string;
+  content_source?: ContentSource | null;
+  source_url?: string | null;
   cover_image: string | null;
   status: PublishStatus;
   is_featured: boolean;
@@ -36,6 +39,8 @@ export interface Project {
   slug: string;
   summary: string | null;
   content: string;
+  content_source?: ContentSource | null;
+  source_url?: string | null;
   image_url: string | null;
   demo_url: string | null;
   repo_url: string | null;

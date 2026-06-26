@@ -26,6 +26,8 @@ create table if not exists blog_posts (
   slug text not null unique,
   excerpt text,
   content text not null default '',
+  content_source text not null default 'manual' check (content_source in ('manual', 'github_readme', 'markdown_url')),
+  source_url text,
   cover_image text,
   status publish_status not null default 'draft',
   is_featured boolean not null default false,
@@ -44,6 +46,8 @@ create table if not exists projects (
   slug text not null unique,
   summary text,
   content text not null default '',
+  content_source text not null default 'manual' check (content_source in ('manual', 'github_readme', 'markdown_url')),
+  source_url text,
   image_url text,
   demo_url text,
   repo_url text,
@@ -56,8 +60,12 @@ create table if not exists projects (
   updated_at timestamptz not null default now()
 );
 
+alter table blog_posts add column if not exists content_source text not null default 'manual' check (content_source in ('manual', 'github_readme', 'markdown_url'));
+alter table blog_posts add column if not exists source_url text;
 alter table blog_posts add column if not exists is_featured boolean not null default false;
 alter table blog_posts add column if not exists sort_order integer not null default 100;
+alter table projects add column if not exists content_source text not null default 'manual' check (content_source in ('manual', 'github_readme', 'markdown_url'));
+alter table projects add column if not exists source_url text;
 alter table projects add column if not exists is_featured boolean not null default false;
 alter table projects add column if not exists sort_order integer not null default 100;
 

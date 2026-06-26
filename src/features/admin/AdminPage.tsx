@@ -32,12 +32,13 @@ import {
   updateSiteSettings,
   updateTopic
 } from '../../lib/contentService';
+import { fetchGitHubReadmeFromRepo, fetchMarkdownFromUrl, readMarkdownFile, type ImportedMarkdownContent } from '../../lib/contentImport';
 import { formatBytes } from '../../lib/imageCompression';
 import { compressAndUploadImage } from '../../lib/mediaService';
 import { generateSeoDescription, generateSeoTitle, getCanonicalUrl, makeUniqueSlug, toSlug, truncateText } from '../../lib/utils';
 import { useAuth } from '../auth/AuthProvider';
 import { SEO } from '../seo/SEO';
-import type { BlogPost, EntityType, Project, SharePlatform, SiteSettings, Topic } from '../../types/content';
+import type { BlogPost, ContentSource, EntityType, Project, SharePlatform, SiteSettings, Topic } from '../../types/content';
 
 type EditableType = Extract<EntityType, 'blog' | 'project' | 'topic'>;
 type Tab = 'content' | 'site' | 'settings';
@@ -49,6 +50,8 @@ interface EditorState {
   slug: string;
   description: string;
   content: string;
+  contentSource: ContentSource;
+  sourceUrl: string;
   status: 'draft' | 'published';
   isFeatured: boolean;
   sortOrder: number;
@@ -67,6 +70,8 @@ const emptyEditor: EditorState = {
   slug: '',
   description: '',
   content: '',
+  contentSource: 'manual',
+  sourceUrl: '',
   status: 'draft',
   isFeatured: false,
   sortOrder: 100,
@@ -105,6 +110,8 @@ function editorFromItem(type: EditableType, item: BlogPost | Project | Topic): E
       slug: post.slug,
       description: post.excerpt ?? '',
       content: post.content,
+      contentSource: post.content_source ?? 'manual',
+      sourceUrl: post.source_url ?? '',
       status: post.status,
       isFeatured: post.is_featured ?? false,
       sortOrder: post.sort_order ?? 100,
@@ -124,6 +131,8 @@ function editorFromItem(type: EditableType, item: BlogPost | Project | Topic): E
     slug: project.slug,
     description: project.summary ?? '',
     content: project.content,
+    contentSource: project.content_source ?? 'manual',
+    sourceUrl: project.source_url ?? '',
     status: project.status,
     isFeatured: project.is_featured ?? false,
     sortOrder: project.sort_order ?? 100,
@@ -199,6 +208,7 @@ export function AdminPage() {
   const [editor, setEditor] = useState<EditorState>(emptyEditor);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [blogImportUrl, setBlogImportUrl] = useState('');
 
   const { data: posts = [] } = useQuery({ queryKey: ['admin', 'blog-posts'], queryFn: getAllBlogPosts });
   const { data: projects = [] } = useQuery({ queryKey: ['admin', 'projects'], queryFn: getAllProjects });
@@ -237,6 +247,8 @@ export function AdminPage() {
           slug,
           excerpt: state.description || null,
           content: state.content || '',
+          content_source: state.contentSource,
+          source_url: state.sourceUrl || null,
           cover_image: state.imageUrl || null,
           status: state.status,
           is_featured: state.isFeatured,
@@ -268,6 +280,8 @@ export function AdminPage() {
         slug,
         summary: state.description || null,
         content: state.content || '',
+        content_source: state.contentSource,
+        source_url: state.sourceUrl || null,
         image_url: state.imageUrl || null,
         demo_url: state.demoUrl || null,
         repo_url: state.repoUrl || null,
@@ -343,6 +357,50 @@ export function AdminPage() {
     onError: (err) => setError(err instanceof Error ? err.message : 'Cannot save settings.')
   });
 
+  function getExistingSlugs(type: EditableType, currentId: string) {
+    if (type === 'blog') return posts.filter((post) => post.id !== currentId).map((post) => post.slug);
+    if (type === 'project') return projects.filter((project) => project.id !== currentId).map((project) => project.slug);
+    return topics.filter((topic) => topic.id !== currentId).map((topic) => topic.slug);
+  }
+
+  function applyImportedContent(imported: ImportedMarkdownContent, targetType: Extract<EditableType, 'blog' | 'project'>) {
+    setEditor((current) => {
+      if (current.type !== targetType) return current;
+
+      const nextTitle = current.title || imported.title || current.title;
+      const shouldUpdateSlug = !current.slug || current.slug === toSlug(current.title);
+      const nextSlug = shouldUpdateSlug && nextTitle ? makeUniqueSlug(nextTitle, getExistingSlugs(current.type, current.id), current.slug) : current.slug;
+
+      return {
+        ...current,
+        title: nextTitle,
+        slug: nextSlug,
+        description: current.description || imported.description || '',
+        content: imported.content,
+        contentSource: imported.source,
+        sourceUrl: imported.sourceUrl,
+        repoUrl: imported.repoUrl || current.repoUrl,
+        demoUrl: current.demoUrl || imported.demoUrl || ''
+      };
+    });
+    setMessage(`Imported ${imported.source === 'github_readme' ? 'GitHub README' : 'Markdown'} content successfully.`);
+    setError('');
+  }
+
+  const contentImportMutation = useMutation({
+    mutationFn: async (input: { type: 'project-readme' | 'blog-url'; url: string }) => {
+      if (input.type === 'project-readme') return fetchGitHubReadmeFromRepo(input.url);
+      return fetchMarkdownFromUrl(input.url);
+    },
+    onSuccess: (imported, variables) => {
+      applyImportedContent(imported, variables.type === 'project-readme' ? 'project' : 'blog');
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Import failed.');
+      setMessage('');
+    }
+  });
+
   const totalPublished = useMemo(
     () => posts.filter((post) => post.status === 'published').length + projects.filter((project) => project.status === 'published').length,
     [posts, projects]
@@ -363,6 +421,7 @@ export function AdminPage() {
 
   function handleTypeChange(type: EditableType) {
     setEditor({ ...emptyEditor, type });
+    setBlogImportUrl('');
   }
 
   function handleEdit(type: EditableType, item: BlogPost | Project | Topic) {
@@ -393,6 +452,20 @@ export function AdminPage() {
     event.target.value = '';
     if (!file) return;
     imageUploadMutation.mutate(file);
+  }
+
+  async function handleBlogFileImport(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      const imported = await readMarkdownFile(file);
+      applyImportedContent(imported, 'blog');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Markdown file import failed.');
+      setMessage('');
+    }
   }
 
   function handleSiteSubmit(event: FormEvent<HTMLFormElement>) {
@@ -550,6 +623,95 @@ export function AdminPage() {
                     <label className="text-sm font-medium">Description {editor.type === 'topic' ? '' : '/ excerpt'}</label>
                     <Textarea value={editor.description} onChange={(event) => setEditor({ ...editor, description: event.target.value })} />
                   </div>
+
+                  {editor.type !== 'topic' ? (
+                    <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                        <div>
+                          <label className="text-sm font-medium">Stateless content source</label>
+                          <p className="text-xs text-muted-foreground">
+                            Manual content is saved in Supabase. GitHub README and Markdown URL modes can refresh content from the source at page load, with saved content as fallback.
+                          </p>
+                        </div>
+                        <Select
+                          className="sm:w-52"
+                          value={editor.contentSource}
+                          onChange={(event) => {
+                            const nextSource = event.target.value as ContentSource;
+                            setEditor({
+                              ...editor,
+                              contentSource: nextSource,
+                              sourceUrl:
+                                nextSource === 'manual'
+                                  ? ''
+                                  : nextSource === 'github_readme'
+                                    ? editor.sourceUrl || editor.repoUrl
+                                    : editor.sourceUrl || blogImportUrl
+                            });
+                          }}
+                        >
+                          <option value="manual">Manual CMS content</option>
+                          {editor.type === 'project' ? <option value="github_readme">GitHub README</option> : null}
+                          {editor.type === 'blog' ? <option value="markdown_url">Markdown URL</option> : null}
+                        </Select>
+                      </div>
+
+                      {editor.type === 'project' ? (
+                        <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                          <Input
+                            value={editor.repoUrl}
+                            onChange={(event) => {
+                              const repoUrl = event.target.value;
+                              setEditor({
+                                ...editor,
+                                repoUrl,
+                                sourceUrl: editor.contentSource === 'github_readme' ? repoUrl : editor.sourceUrl
+                              });
+                            }}
+                            placeholder="https://github.com/user/repository"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={contentImportMutation.isPending || !editor.repoUrl.trim()}
+                            onClick={() => contentImportMutation.mutate({ type: 'project-readme', url: editor.repoUrl })}
+                          >
+                            {contentImportMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                            Import README
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                            <Input
+                              value={blogImportUrl}
+                              onChange={(event) => setBlogImportUrl(event.target.value)}
+                              placeholder="https://raw.githubusercontent.com/user/repo/main/post.md"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={contentImportMutation.isPending || !blogImportUrl.trim()}
+                              onClick={() => contentImportMutation.mutate({ type: 'blog-url', url: blogImportUrl })}
+                            >
+                              {contentImportMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                              Import URL
+                            </Button>
+                          </div>
+                          <Button type="button" variant="outline" asChild>
+                            <label className="cursor-pointer">
+                              <Upload className="h-4 w-4" />
+                              Import .md file
+                              <input type="file" accept=".md,.markdown,text/markdown,text/plain" className="sr-only" onChange={handleBlogFileImport} />
+                            </label>
+                          </Button>
+                        </div>
+                      )}
+
+                      {editor.sourceUrl ? <p className="break-all text-xs text-muted-foreground">Source: {editor.sourceUrl}</p> : null}
+                    </div>
+                  ) : null}
+
                   {editor.type === 'topic' ? (
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Aliases, comma separated</label>
@@ -660,15 +822,9 @@ export function AdminPage() {
                       </div>
 
                       {editor.type === 'project' ? (
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Demo URL</label>
-                            <Input value={editor.demoUrl} onChange={(event) => setEditor({ ...editor, demoUrl: event.target.value })} />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Repo URL</label>
-                            <Input value={editor.repoUrl} onChange={(event) => setEditor({ ...editor, repoUrl: event.target.value })} />
-                          </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Demo URL</label>
+                          <Input value={editor.demoUrl} onChange={(event) => setEditor({ ...editor, demoUrl: event.target.value })} />
                         </div>
                       ) : null}
                     </>

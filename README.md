@@ -9,6 +9,7 @@ Built from the ground up using:
 - Supabase Postgres + RLS for CMS content storage
 - Supabase Storage for compressed CMS images
 - WordPress/Blogger-style CMS editor with slug generation, rich Markdown, images, YouTube embeds, and audio embeds
+- Stateless content source mode for GitHub README project pages and Markdown URL blog posts
 - React Query for data loading
 - Lightweight SVG knowledge graph, no heavy graph canvas dependency
 - Social share fallback dialog, share-event tracking, and queued auto-share jobs
@@ -90,6 +91,9 @@ Blog posts and projects also support:
 - Inline compressed image upload into the article body
 - YouTube embeds using `::youtube https://youtu.be/video_id`
 - Audio embeds using `::audio https://example.com/audio.mp3`
+- Project README import from a GitHub repository URL
+- Blog Markdown import from a remote URL or local `.md` file
+- Stateless source mode: GitHub README / Markdown URL content can be refreshed at public page load while stored CMS content remains the fallback
 
 Images are compressed in the browser to WebP/JPEG and uploaded to the public Supabase Storage bucket named `portfolio-media`. Run `supabase/schema.sql` again if you are upgrading an older project so the bucket and storage policies are created.
 
@@ -115,6 +119,24 @@ Paragraph with **bold text**, *italic text*, and [a link](https://example.com).
 ```
 
 The public blog/project detail pages render that input as polished CMS output with responsive images, safe YouTube iframes, and native audio controls.
+
+
+## Stateless CMS source mode
+
+The admin form has a **Stateless content source** selector:
+
+- `Manual CMS content` stores and renders the `content` column from Supabase.
+- `GitHub README` is for projects. Paste a GitHub repository URL, click **Import README**, then save. The project detail loader can refresh the README from GitHub at page load; the saved content is kept as fallback.
+- `Markdown URL` is for blog posts. Paste a raw Markdown URL, click **Import URL**, then save. The blog detail loader can refresh the Markdown URL at page load; the saved content is kept as fallback.
+
+For local blog drafts, use **Import .md file**. File imports are stored as normal manual CMS content because a browser-selected local file cannot be fetched again by public visitors.
+
+When upgrading an existing Supabase database, run `supabase/schema.sql` again so these columns are added:
+
+```sql
+content_source text not null default 'manual'
+source_url text
+```
 
 ## Automatic SEO
 

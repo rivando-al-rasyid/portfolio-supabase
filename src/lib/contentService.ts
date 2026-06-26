@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { mockBlogPosts, mockProjects, mockSiteSettings, mockTopics } from './mockData';
+import { fetchGitHubReadmeFromRepo, fetchMarkdownFromUrl } from './contentImport';
 import type { BlogPost, EntityType, Project, SharePlatform, ShareSettings, SiteSettings, Topic } from '../types/content';
 
 const blogSelect = '*, blog_post_topics(topics(*))';
@@ -20,6 +21,8 @@ interface ProjectRow extends Project {
 function mapBlog(row: BlogRow): BlogPost {
   return {
     ...row,
+    content_source: row.content_source ?? 'manual',
+    source_url: row.source_url ?? null,
     is_featured: row.is_featured ?? false,
     sort_order: row.sort_order ?? 100,
     topics: row.blog_post_topics?.map((item) => item.topics).filter(Boolean) as Topic[] | undefined
@@ -29,10 +32,46 @@ function mapBlog(row: BlogRow): BlogPost {
 function mapProject(row: ProjectRow): Project {
   return {
     ...row,
+    content_source: row.content_source ?? 'manual',
+    source_url: row.source_url ?? null,
     is_featured: row.is_featured ?? false,
     sort_order: row.sort_order ?? 100,
     topics: row.project_topics?.map((item) => item.topics).filter(Boolean) as Topic[] | undefined
   };
+}
+
+async function resolveBlogContent(post: BlogPost): Promise<BlogPost> {
+  if (post.content_source !== 'markdown_url' || !post.source_url) return post;
+
+  try {
+    const imported = await fetchMarkdownFromUrl(post.source_url);
+    return { ...post, content: imported.content };
+  } catch (error) {
+    console.warn('Using stored blog content because markdown import failed:', error instanceof Error ? error.message : error);
+    return post;
+  }
+}
+
+async function resolveProjectContent(project: Project): Promise<Project> {
+  const shouldFetchReadme =
+    Boolean(project.repo_url) && (project.content_source === 'github_readme' || project.content.trim().length === 0);
+
+  if (!shouldFetchReadme || !project.repo_url) return project;
+
+  try {
+    const imported = await fetchGitHubReadmeFromRepo(project.repo_url);
+    return {
+      ...project,
+      content: imported.content,
+      source_url: imported.sourceUrl,
+      content_source: 'github_readme',
+      summary: project.summary || imported.description || project.summary,
+      demo_url: project.demo_url || imported.demoUrl || null
+    };
+  } catch (error) {
+    console.warn('Using stored project content because GitHub README import failed:', error instanceof Error ? error.message : error);
+    return project;
+  }
 }
 
 export async function getSiteSettings() {
@@ -94,7 +133,7 @@ export async function getBlogPostBySlug(slug: string) {
     return mockBlogPosts.find((post) => post.slug === slug) ?? null;
   }
 
-  return data ? mapBlog(data as BlogRow) : mockBlogPosts.find((post) => post.slug === slug) ?? null;
+  return data ? resolveBlogContent(mapBlog(data as BlogRow)) : mockBlogPosts.find((post) => post.slug === slug) ?? null;
 }
 
 export async function getPublishedProjects() {
@@ -133,7 +172,7 @@ export async function getProjectBySlug(slug: string) {
     return mockProjects.find((project) => project.slug === slug) ?? null;
   }
 
-  return data ? mapProject(data as ProjectRow) : mockProjects.find((project) => project.slug === slug) ?? null;
+  return data ? resolveProjectContent(mapProject(data as ProjectRow)) : mockProjects.find((project) => project.slug === slug) ?? null;
 }
 
 export async function getTopics() {
