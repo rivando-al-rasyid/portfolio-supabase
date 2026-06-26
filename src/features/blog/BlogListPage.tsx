@@ -14,7 +14,7 @@ export function BlogListPage() {
         <div className="mb-8 max-w-2xl">
           <p className="text-sm font-semibold uppercase tracking-[0.25em] text-primary">Blog</p>
           <h1 className="mt-3 text-3xl font-bold tracking-tight md:text-5xl">Notes, decisions, and build logs.</h1>
-          <p className="mt-4 text-muted-foreground">Write public articles from the admin dashboard and connect them to topics automatically.</p>
+          <p className="mt-4 text-muted-foreground">Write public articles from the admin dashboard and connect them to categories automatically.</p>
         </div>
 
         {posts.length === 0 ? (

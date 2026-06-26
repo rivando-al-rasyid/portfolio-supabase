@@ -36,9 +36,9 @@ export function ContentCard({ item, type }: ContentCardProps) {
       </CardHeader>
       <CardContent className="mt-auto">
         <div className="mb-5 flex flex-wrap gap-2">
-          {item.topics?.slice(0, 3).map((topic) => (
-            <Badge key={topic.id} variant="outline">
-              {topic.name}
+          {item.categories?.slice(0, 3).map((category) => (
+            <Badge key={category.id} variant="outline">
+              {category.name}
             </Badge>
           ))}
         </div>

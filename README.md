@@ -12,7 +12,7 @@ Built from the ground up using:
 - Stateless content source mode for GitHub README project pages and Markdown URL blog posts
 - React Query for data loading
 - Lightweight SVG knowledge graph, no heavy graph canvas dependency
-- Social share fallback dialog, share-event tracking, and queued auto-share jobs
+- Social share fallback dialog, share-event tracking, API-code database config, and queued auto-share jobs
 
 ## Install
 
@@ -73,7 +73,7 @@ The dashboard now works as a small CMS. It supports creating, editing, and delet
 
 - Blog posts
 - Projects
-- Topics
+- Searchable categories created from blog/project input
 - Homepage hero/site copy
 - Share settings
 
@@ -84,7 +84,7 @@ Blog posts and projects also support:
 - Sort order
 - Automatic clean slug generation with manual override
 - Automatic SEO title and description generated from CMS title, excerpt/summary, and rich content
-- Topic assignment
+- Category search/assignment with automatic create-or-reuse behavior
 - Cover image upload with browser-side compression before Supabase Storage upload
 - Rich CMS content input with write/preview mode
 - Bold, italic, links, headings, lists, quotes, code blocks, and horizontal rules
@@ -149,13 +149,13 @@ The public detail pages also generate a fallback SEO description from the CMS co
 
 ## Auto-share requirements
 
-The CMS can queue auto-share jobs when new blog posts or projects are published. Real automatic posting still requires a backend worker and platform API credentials. Read:
+The CMS can queue auto-share jobs when new blog posts or projects are published. API code/token data is stored in `social_api_connections`, and queued jobs are stored in `social_share_queue`. Real posting should be processed by the included Supabase Edge Function or your own backend worker. Read:
 
 ```txt
 docs/social-auto-share-requirements.md
 ```
 
-Do not put social API secrets in `VITE_` frontend environment variables. Use Supabase Edge Function secrets, a backend server, or an automation service such as n8n/Zapier/Make.
+Do not put social API secrets in `VITE_` frontend environment variables. The dashboard can save database API config for admin use, but posting should happen from `supabase/functions/process-social-share`, a backend server, or an automation service such as n8n/Zapier/Make.
 
 ## Security note
 
@@ -174,7 +174,7 @@ src/
   components/
     ui/                 shadcn-style components
   features/
-    admin/              protected dashboard
+    admin/              protected dashboard, category input, auto-share API settings
     auth/               Supabase auth provider, login, route guard
     blog/               list/detail pages
     graph/              SVG knowledge graph

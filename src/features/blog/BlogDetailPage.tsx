@@ -43,9 +43,9 @@ export function BlogDetailPage() {
           <img src={post.cover_image} alt={post.title} className="mt-8 aspect-video w-full rounded-2xl border object-cover shadow-sm" />
         ) : null}
         <div className="mt-6 flex flex-wrap gap-2">
-          {post.topics?.map((topic) => (
-            <Badge key={topic.id} variant="outline">
-              {topic.name}
+          {post.categories?.map((category) => (
+            <Badge key={category.id} variant="outline">
+              {category.name}
             </Badge>
           ))}
         </div>

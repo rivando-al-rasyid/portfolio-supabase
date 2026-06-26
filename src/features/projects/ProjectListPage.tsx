@@ -14,7 +14,7 @@ export function ProjectListPage() {
         <div className="mb-8 max-w-2xl">
           <p className="text-sm font-semibold uppercase tracking-[0.25em] text-primary">Projects</p>
           <h1 className="mt-3 text-3xl font-bold tracking-tight md:text-5xl">Work that connects product and engineering.</h1>
-          <p className="mt-4 text-muted-foreground">Showcase projects, link repositories, and connect each work item to topics.</p>
+          <p className="mt-4 text-muted-foreground">Showcase projects, link repositories, and connect each work item to categories.</p>
         </div>
 
         {projects.length === 0 ? (

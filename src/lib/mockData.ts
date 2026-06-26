@@ -1,31 +1,28 @@
-import type { BlogPost, Project, SiteSettings, Topic } from '../types/content';
+import type { BlogPost, Category, Project, SiteSettings } from '../types/content';
 
 const now = new Date().toISOString();
 
-export const mockTopics: Topic[] = [
+export const mockCategories: Category[] = [
   {
-    id: 'topic-react',
+    id: 'category-react',
     name: 'React',
     slug: 'react',
-    description: 'Frontend architecture, routing, state, and UI composition.',
-    aliases: ['frontend', 'vite'],
-    created_at: now
+    created_at: now,
+    updated_at: now
   },
   {
-    id: 'topic-go',
+    id: 'category-go',
     name: 'Go Backend',
     slug: 'go-backend',
-    description: 'REST APIs, PostgreSQL, Redis, and Docker-backed services.',
-    aliases: ['golang', 'api'],
-    created_at: now
+    created_at: now,
+    updated_at: now
   },
   {
-    id: 'topic-supabase',
+    id: 'category-supabase',
     name: 'Supabase',
     slug: 'supabase',
-    description: 'Auth, Postgres, RLS, and realtime-ready application data.',
-    aliases: ['postgres', 'auth'],
-    created_at: now
+    created_at: now,
+    updated_at: now
   }
 ];
 
@@ -36,7 +33,7 @@ export const mockBlogPosts: BlogPost[] = [
     slug: 'building-a-portfolio-with-a-knowledge-graph',
     excerpt: 'How tags, internal links, and project references can turn a portfolio into a navigable knowledge map.',
     content:
-      '## Why a graph portfolio?\nA normal portfolio lists work. A graph portfolio shows how ideas, projects, and skills connect.\n\n## Signals\nUse topics, links, aliases, and keyword overlap to generate relations automatically.\n\nYou can also write **bold text**, add [project links](/projects), embed images with Markdown, and paste media embeds.\n\n::youtube https://youtu.be/dQw4w9WgXcQ\n\n## Admin workflow\nWrite a post, publish it, then rebuild relations from the dashboard.',
+      '## Why a graph portfolio?\nA normal portfolio lists work. A graph portfolio shows how ideas, projects, and skills connect.\n\n## Signals\nUse categories, links, aliases, and keyword overlap to generate relations automatically.\n\nYou can also write **bold text**, add [project links](/projects), embed images with Markdown, and paste media embeds.\n\n::youtube https://youtu.be/dQw4w9WgXcQ\n\n## Admin workflow\nWrite a post, publish it, then rebuild relations from the dashboard.',
     cover_image: null,
     status: 'published',
     is_featured: true,
@@ -47,7 +44,7 @@ export const mockBlogPosts: BlogPost[] = [
     published_at: now,
     created_at: now,
     updated_at: now,
-    topics: [mockTopics[0], mockTopics[2]]
+    categories: [mockCategories[0], mockCategories[2]]
   },
   {
     id: 'blog-2',
@@ -66,7 +63,7 @@ export const mockBlogPosts: BlogPost[] = [
     published_at: now,
     created_at: now,
     updated_at: now,
-    topics: [mockTopics[2]]
+    categories: [mockCategories[2]]
   }
 ];
 
@@ -88,7 +85,7 @@ export const mockProjects: Project[] = [
     meta_description: null,
     created_at: now,
     updated_at: now,
-    topics: [mockTopics[0], mockTopics[1]]
+    categories: [mockCategories[0], mockCategories[1]]
   },
   {
     id: 'project-2',
@@ -107,7 +104,7 @@ export const mockProjects: Project[] = [
     meta_description: null,
     created_at: now,
     updated_at: now,
-    topics: [mockTopics[1]]
+    categories: [mockCategories[1]]
   }
 ];
 
@@ -118,7 +115,7 @@ export const mockSiteSettings: SiteSettings = {
   hero_badge: 'React + Tailwind 4 + Supabase',
   hero_title: 'Portfolio that works like a knowledge graph.',
   hero_description:
-    'Publish posts, projects, and topics from a protected CMS dashboard. Then connect them through automatic relations and share-ready SEO metadata.',
+    'Publish posts, projects, and categories from a protected CMS dashboard. Then connect them through automatic relations and share-ready SEO metadata.',
   primary_cta_label: 'View projects',
   primary_cta_href: '/projects',
   secondary_cta_label: 'Explore graph',

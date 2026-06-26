@@ -35,9 +35,9 @@ export function ProjectDetailPage() {
         </Button>
         <div className="mb-5 flex flex-wrap items-center gap-2">
           <Badge variant="secondary">Project</Badge>
-          {project.topics?.map((topic) => (
-            <Badge key={topic.id} variant="outline">
-              {topic.name}
+          {project.categories?.map((category) => (
+            <Badge key={category.id} variant="outline">
+              {category.name}
             </Badge>
           ))}
         </div>

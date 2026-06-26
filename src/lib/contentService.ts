@@ -1,21 +1,32 @@
 import { supabase } from './supabase';
-import { mockBlogPosts, mockProjects, mockSiteSettings, mockTopics } from './mockData';
+import { mockBlogPosts, mockCategories, mockProjects, mockSiteSettings } from './mockData';
 import { fetchGitHubReadmeFromRepo, fetchMarkdownFromUrl } from './contentImport';
-import type { BlogPost, EntityType, Project, SharePlatform, ShareSettings, SiteSettings, Topic } from '../types/content';
+import { toSlug } from './utils';
+import type {
+  BlogPost,
+  Category,
+  EntityType,
+  Project,
+  SharePlatform,
+  ShareSettings,
+  SiteSettings,
+  SocialApiConnection,
+  SocialShareQueueItem
+} from '../types/content';
 
-const blogSelect = '*, blog_post_topics(topics(*))';
-const projectSelect = '*, project_topics(topics(*))';
+const blogSelect = '*, blog_post_categories(categories(*))';
+const projectSelect = '*, project_categories(categories(*))';
 
-interface TopicJoinRow {
-  topics: Topic | null;
+interface CategoryJoinRow {
+  categories: Category | null;
 }
 
 interface BlogRow extends BlogPost {
-  blog_post_topics?: TopicJoinRow[] | null;
+  blog_post_categories?: CategoryJoinRow[] | null;
 }
 
 interface ProjectRow extends Project {
-  project_topics?: TopicJoinRow[] | null;
+  project_categories?: CategoryJoinRow[] | null;
 }
 
 function mapBlog(row: BlogRow): BlogPost {
@@ -25,7 +36,7 @@ function mapBlog(row: BlogRow): BlogPost {
     source_url: row.source_url ?? null,
     is_featured: row.is_featured ?? false,
     sort_order: row.sort_order ?? 100,
-    topics: row.blog_post_topics?.map((item) => item.topics).filter(Boolean) as Topic[] | undefined
+    categories: row.blog_post_categories?.map((item) => item.categories).filter(Boolean) as Category[] | undefined
   };
 }
 
@@ -36,42 +47,89 @@ function mapProject(row: ProjectRow): Project {
     source_url: row.source_url ?? null,
     is_featured: row.is_featured ?? false,
     sort_order: row.sort_order ?? 100,
-    topics: row.project_topics?.map((item) => item.topics).filter(Boolean) as Topic[] | undefined
+    categories: row.project_categories?.map((item) => item.categories).filter(Boolean) as Category[] | undefined
   };
 }
 
+function uniqueCategoryNames(names: string[]) {
+  const seen = new Set<string>();
+  return names
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .filter((name) => {
+      const key = toSlug(name);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
 async function resolveBlogContent(post: BlogPost): Promise<BlogPost> {
-  if (post.content_source !== 'markdown_url' || !post.source_url) return post;
+  if (!post.source_url) return post;
 
   try {
-    const imported = await fetchMarkdownFromUrl(post.source_url);
-    return { ...post, content: imported.content };
+    if (post.content_source === 'github_readme') {
+      const imported = await fetchGitHubReadmeFromRepo(post.source_url);
+      return {
+        ...post,
+        content: imported.content,
+        excerpt: post.excerpt || imported.description || null,
+        cover_image: post.cover_image || imported.imageUrl || null,
+        source_url: imported.sourceUrl
+      };
+    }
+
+    if (post.content_source === 'markdown_url') {
+      const imported = await fetchMarkdownFromUrl(post.source_url);
+      return {
+        ...post,
+        content: imported.content,
+        excerpt: post.excerpt || imported.description || null,
+        cover_image: post.cover_image || imported.imageUrl || null
+      };
+    }
   } catch (error) {
-    console.warn('Using stored blog content because markdown import failed:', error instanceof Error ? error.message : error);
-    return post;
+    console.warn('Using stored blog content because stateless import failed:', error instanceof Error ? error.message : error);
   }
+
+  return post;
 }
 
 async function resolveProjectContent(project: Project): Promise<Project> {
-  const shouldFetchReadme =
-    Boolean(project.repo_url) && (project.content_source === 'github_readme' || project.content.trim().length === 0);
-
-  if (!shouldFetchReadme || !project.repo_url) return project;
+  const sourceUrl = project.source_url || project.repo_url;
+  if (!sourceUrl) return project;
 
   try {
-    const imported = await fetchGitHubReadmeFromRepo(project.repo_url);
-    return {
-      ...project,
-      content: imported.content,
-      source_url: imported.sourceUrl,
-      content_source: 'github_readme',
-      summary: project.summary || imported.description || project.summary,
-      demo_url: project.demo_url || imported.demoUrl || null
-    };
+    if (project.content_source === 'github_readme' || (project.content.trim().length === 0 && project.repo_url)) {
+      const imported = await fetchGitHubReadmeFromRepo(sourceUrl);
+      return {
+        ...project,
+        content: imported.content,
+        source_url: imported.sourceUrl,
+        content_source: 'github_readme',
+        summary: project.summary || imported.description || project.summary,
+        image_url: project.image_url || imported.imageUrl || null,
+        repo_url: project.repo_url || imported.repoUrl || null,
+        demo_url: project.demo_url || imported.demoUrl || null
+      };
+    }
+
+    if (project.content_source === 'markdown_url') {
+      const imported = await fetchMarkdownFromUrl(sourceUrl);
+      return {
+        ...project,
+        content: imported.content,
+        summary: project.summary || imported.description || project.summary,
+        image_url: project.image_url || imported.imageUrl || null,
+        repo_url: project.repo_url || imported.repoUrl || null,
+        demo_url: project.demo_url || imported.demoUrl || null
+      };
+    }
   } catch (error) {
-    console.warn('Using stored project content because GitHub README import failed:', error instanceof Error ? error.message : error);
-    return project;
+    console.warn('Using stored project content because stateless import failed:', error instanceof Error ? error.message : error);
   }
+
+  return project;
 }
 
 export async function getSiteSettings() {
@@ -122,11 +180,7 @@ export async function getAllBlogPosts() {
 }
 
 export async function getBlogPostBySlug(slug: string) {
-  const { data, error } = await supabase
-    .from('blog_posts')
-    .select(blogSelect)
-    .eq('slug', slug)
-    .maybeSingle();
+  const { data, error } = await supabase.from('blog_posts').select(blogSelect).eq('slug', slug).maybeSingle();
 
   if (error) {
     console.warn('Using mock blog post because Supabase returned:', error.message);
@@ -175,13 +229,13 @@ export async function getProjectBySlug(slug: string) {
   return data ? resolveProjectContent(mapProject(data as ProjectRow)) : mockProjects.find((project) => project.slug === slug) ?? null;
 }
 
-export async function getTopics() {
-  const { data, error } = await supabase.from('topics').select('*').order('name');
+export async function getCategories() {
+  const { data, error } = await supabase.from('categories').select('*').order('name');
   if (error) {
-    console.warn('Using mock topics because Supabase returned:', error.message);
-    return mockTopics;
+    console.warn('Using mock categories because Supabase returned:', error.message);
+    return mockCategories;
   }
-  return data as Topic[];
+  return data as Category[];
 }
 
 export async function createBlogPost(payload: Partial<BlogPost>) {
@@ -228,38 +282,75 @@ export async function deleteProject(id: string) {
   if (error) throw error;
 }
 
-export async function replaceBlogPostTopics(blogPostId: string, topicIds: string[]) {
-  const { error: deleteError } = await supabase.from('blog_post_topics').delete().eq('blog_post_id', blogPostId);
+export async function getOrCreateCategoriesByName(names: string[]) {
+  const categoryNames = uniqueCategoryNames(names);
+  if (!categoryNames.length) return [] as Category[];
+
+  const slugs = categoryNames.map((name) => toSlug(name));
+  const { data: existing, error: existingError } = await supabase.from('categories').select('*').in('slug', slugs);
+  if (existingError) throw existingError;
+
+  const existingCategories = (existing ?? []) as Category[];
+  const existingSlugSet = new Set(existingCategories.map((category) => category.slug));
+  const newRows = categoryNames
+    .map((name) => ({ name, slug: toSlug(name) }))
+    .filter((row) => row.slug && !existingSlugSet.has(row.slug));
+
+  let createdCategories: Category[] = [];
+  if (newRows.length) {
+    const { data: created, error: createError } = await supabase.from('categories').insert(newRows).select('*');
+    if (createError) {
+      // A concurrent insert can race with this request. In that case, reload by slug and reuse the existing rows.
+      if (createError.code !== '23505') throw createError;
+    } else {
+      createdCategories = (created ?? []) as Category[];
+    }
+  }
+
+  const expectedCount = categoryNames.length;
+  const combined = [...existingCategories, ...createdCategories];
+  if (combined.length >= expectedCount) return combined;
+
+  const { data: reloaded, error: reloadError } = await supabase.from('categories').select('*').in('slug', slugs);
+  if (reloadError) throw reloadError;
+  return (reloaded ?? []) as Category[];
+}
+
+export async function replaceBlogPostCategories(blogPostId: string, categoryNames: string[]) {
+  const categories = await getOrCreateCategoriesByName(categoryNames);
+  const { error: deleteError } = await supabase.from('blog_post_categories').delete().eq('blog_post_id', blogPostId);
   if (deleteError) throw deleteError;
-  if (!topicIds.length) return;
-  const rows = topicIds.map((topicId) => ({ blog_post_id: blogPostId, topic_id: topicId }));
-  const { error } = await supabase.from('blog_post_topics').insert(rows);
+  if (!categories.length) return categories;
+  const rows = categories.map((category) => ({ blog_post_id: blogPostId, category_id: category.id }));
+  const { error } = await supabase.from('blog_post_categories').insert(rows);
   if (error) throw error;
+  return categories;
 }
 
-export async function replaceProjectTopics(projectId: string, topicIds: string[]) {
-  const { error: deleteError } = await supabase.from('project_topics').delete().eq('project_id', projectId);
+export async function replaceProjectCategories(projectId: string, categoryNames: string[]) {
+  const categories = await getOrCreateCategoriesByName(categoryNames);
+  const { error: deleteError } = await supabase.from('project_categories').delete().eq('project_id', projectId);
   if (deleteError) throw deleteError;
-  if (!topicIds.length) return;
-  const rows = topicIds.map((topicId) => ({ project_id: projectId, topic_id: topicId }));
-  const { error } = await supabase.from('project_topics').insert(rows);
+  if (!categories.length) return categories;
+  const rows = categories.map((category) => ({ project_id: projectId, category_id: category.id }));
+  const { error } = await supabase.from('project_categories').insert(rows);
   if (error) throw error;
+  return categories;
 }
 
-export async function createTopic(payload: Partial<Topic>) {
-  const { data, error } = await supabase.from('topics').insert(payload).select('*').single();
+export async function updateCategory(id: string, payload: Partial<Category>) {
+  const { data, error } = await supabase
+    .from('categories')
+    .update({ ...payload, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single();
   if (error) throw error;
-  return data as Topic;
+  return data as Category;
 }
 
-export async function updateTopic(id: string, payload: Partial<Topic>) {
-  const { data, error } = await supabase.from('topics').update(payload).eq('id', id).select('*').single();
-  if (error) throw error;
-  return data as Topic;
-}
-
-export async function deleteTopic(id: string) {
-  const { error } = await supabase.from('topics').delete().eq('id', id);
+export async function deleteCategory(id: string) {
+  const { error } = await supabase.from('categories').delete().eq('id', id);
   if (error) throw error;
 }
 
@@ -287,6 +378,40 @@ export async function updateShareSettings(payload: Pick<ShareSettings, 'auto_sha
   return data as ShareSettings;
 }
 
+export async function getSocialApiConnections() {
+  const { data, error } = await supabase.from('social_api_connections').select('*').order('platform');
+  if (error) {
+    console.warn('Cannot load social API connections:', error.message);
+    return [] as SocialApiConnection[];
+  }
+  return data as SocialApiConnection[];
+}
+
+export async function upsertSocialApiConnection(
+  payload: Pick<SocialApiConnection, 'platform' | 'label' | 'is_enabled' | 'api_base_url' | 'api_code' | 'api_token' | 'api_secret' | 'account_id' | 'extra_config'>
+) {
+  const { data, error } = await supabase
+    .from('social_api_connections')
+    .upsert({ ...payload, updated_at: new Date().toISOString() }, { onConflict: 'platform' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as SocialApiConnection;
+}
+
+export async function getShareQueue() {
+  const { data, error } = await supabase
+    .from('social_share_queue')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) {
+    console.warn('Cannot load share queue:', error.message);
+    return [] as SocialShareQueueItem[];
+  }
+  return data as SocialShareQueueItem[];
+}
+
 export async function enqueueShareJobs(input: {
   entityType: Extract<EntityType, 'blog' | 'project'>;
   entityId: string;
@@ -305,6 +430,14 @@ export async function enqueueShareJobs(input: {
 
   const { error } = await supabase.from('social_share_queue').insert(rows);
   if (error) console.warn('Share queue insert failed:', error.message);
+}
+
+export async function runSocialShareProcessor() {
+  const { data, error } = await supabase.functions.invoke('process-social-share', {
+    body: { limit: 10 }
+  });
+  if (error) throw error;
+  return data as { processed?: number; failed?: number; message?: string };
 }
 
 export async function trackShareEvent(input: {

@@ -1,7 +1,7 @@
-import { ChangeEvent, FormEvent, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, KeyboardEvent, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ImageIcon, Loader2, LogOut, Pencil, Plus, RefreshCw, Save, Settings, Trash2, Upload } from 'lucide-react';
+import { ImageIcon, Loader2, LogOut, Pencil, Plus, RefreshCw, Rocket, Save, Settings, Trash2, Upload, X } from 'lucide-react';
 import { CmsRichTextEditor } from '../../components/CmsRichTextEditor';
 import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert';
 import { Badge } from '../../components/ui/badge';
@@ -14,23 +14,25 @@ import { Textarea } from '../../components/ui/textarea';
 import {
   createBlogPost,
   createProject,
-  createTopic,
   deleteBlogPost,
+  deleteCategory,
   deleteProject,
-  deleteTopic,
   enqueueShareJobs,
   getAllBlogPosts,
   getAllProjects,
+  getCategories,
+  getShareQueue,
   getShareSettings,
   getSiteSettings,
-  getTopics,
-  replaceBlogPostTopics,
-  replaceProjectTopics,
+  getSocialApiConnections,
+  replaceBlogPostCategories,
+  replaceProjectCategories,
+  runSocialShareProcessor,
   updateBlogPost,
   updateProject,
   updateShareSettings,
   updateSiteSettings,
-  updateTopic
+  upsertSocialApiConnection
 } from '../../lib/contentService';
 import { fetchGitHubReadmeFromRepo, fetchMarkdownFromUrl, readMarkdownFile, type ImportedMarkdownContent } from '../../lib/contentImport';
 import { formatBytes } from '../../lib/imageCompression';
@@ -38,9 +40,9 @@ import { compressAndUploadImage } from '../../lib/mediaService';
 import { generateSeoDescription, generateSeoTitle, getCanonicalUrl, makeUniqueSlug, toSlug, truncateText } from '../../lib/utils';
 import { useAuth } from '../auth/AuthProvider';
 import { SEO } from '../seo/SEO';
-import type { BlogPost, ContentSource, EntityType, Project, SharePlatform, SiteSettings, Topic } from '../../types/content';
+import type { BlogPost, Category, ContentSource, Project, SharePlatform, SiteSettings, SocialApiConnection } from '../../types/content';
 
-type EditableType = Extract<EntityType, 'blog' | 'project' | 'topic'>;
+type EditableType = 'blog' | 'project';
 type Tab = 'content' | 'site' | 'settings';
 
 interface EditorState {
@@ -58,9 +60,19 @@ interface EditorState {
   imageUrl: string;
   demoUrl: string;
   repoUrl: string;
-  metaTitle: string;
-  metaDescription: string;
-  topicIds: string[];
+  categoryNames: string[];
+}
+
+interface ApiConnectionEditorState {
+  platform: SharePlatform;
+  label: string;
+  isEnabled: boolean;
+  apiBaseUrl: string;
+  apiCode: string;
+  apiToken: string;
+  apiSecret: string;
+  accountId: string;
+  extraConfig: string;
 }
 
 const emptyEditor: EditorState = {
@@ -78,28 +90,24 @@ const emptyEditor: EditorState = {
   imageUrl: '',
   demoUrl: '',
   repoUrl: '',
-  metaTitle: '',
-  metaDescription: '',
-  topicIds: []
+  categoryNames: []
 };
 
 const platforms: SharePlatform[] = ['linkedin', 'x', 'facebook', 'whatsapp', 'telegram', 'email'];
 
-function editorFromItem(type: EditableType, item: BlogPost | Project | Topic): EditorState {
-  if (type === 'topic') {
-    const topic = item as Topic;
-    return {
-      ...emptyEditor,
-      id: topic.id,
-      type,
-      title: topic.name,
-      slug: topic.slug,
-      description: topic.description ?? '',
-      content: topic.aliases?.join(', ') ?? '',
-      topicIds: []
-    };
-  }
+const emptyApiEditor: ApiConnectionEditorState = {
+  platform: 'linkedin',
+  label: '',
+  isEnabled: true,
+  apiBaseUrl: '',
+  apiCode: '',
+  apiToken: '',
+  apiSecret: '',
+  accountId: '',
+  extraConfig: '{}'
+};
 
+function editorFromItem(type: EditableType, item: BlogPost | Project): EditorState {
   if (type === 'blog') {
     const post = item as BlogPost;
     return {
@@ -116,9 +124,7 @@ function editorFromItem(type: EditableType, item: BlogPost | Project | Topic): E
       isFeatured: post.is_featured ?? false,
       sortOrder: post.sort_order ?? 100,
       imageUrl: post.cover_image ?? '',
-      metaTitle: post.meta_title ?? '',
-      metaDescription: post.meta_description ?? '',
-      topicIds: post.topics?.map((topic) => topic.id) ?? []
+      categoryNames: post.categories?.map((category) => category.name) ?? []
     };
   }
 
@@ -139,9 +145,21 @@ function editorFromItem(type: EditableType, item: BlogPost | Project | Topic): E
     imageUrl: project.image_url ?? '',
     demoUrl: project.demo_url ?? '',
     repoUrl: project.repo_url ?? '',
-    metaTitle: project.meta_title ?? '',
-    metaDescription: project.meta_description ?? '',
-    topicIds: project.topics?.map((topic) => topic.id) ?? []
+    categoryNames: project.categories?.map((category) => category.name) ?? []
+  };
+}
+
+function apiEditorFromConnection(connection: SocialApiConnection): ApiConnectionEditorState {
+  return {
+    platform: connection.platform,
+    label: connection.label ?? '',
+    isEnabled: connection.is_enabled,
+    apiBaseUrl: connection.api_base_url ?? '',
+    apiCode: connection.api_code ?? '',
+    apiToken: connection.api_token ?? '',
+    apiSecret: connection.api_secret ?? '',
+    accountId: connection.account_id ?? '',
+    extraConfig: JSON.stringify(connection.extra_config ?? {}, null, 2)
   };
 }
 
@@ -153,9 +171,9 @@ function ContentList({
   onDelete
 }: {
   title: string;
-  items: Array<BlogPost | Project | Topic>;
+  items: Array<BlogPost | Project>;
   type: EditableType;
-  onEdit: (type: EditableType, item: BlogPost | Project | Topic) => void;
+  onEdit: (type: EditableType, item: BlogPost | Project) => void;
   onDelete: (type: EditableType, id: string) => void;
 }) {
   return (
@@ -167,21 +185,27 @@ function ContentList({
       <CardContent className="space-y-3">
         {items.length === 0 ? <p className="text-sm text-muted-foreground">No items yet.</p> : null}
         {items.map((item) => {
-          const itemTitle = 'name' in item ? item.name : item.title;
-          const itemDescription = 'description' in item ? item.description : 'excerpt' in item ? item.excerpt : item.summary;
-          const status = 'status' in item ? item.status : 'published';
-          const isFeatured = 'is_featured' in item ? item.is_featured : false;
+          const itemDescription = 'excerpt' in item ? item.excerpt : item.summary;
           return (
             <div key={item.id} className="rounded-lg border p-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-medium">{itemTitle}</h3>
-                    <Badge variant={status === 'published' ? 'default' : 'outline'}>{status}</Badge>
-                    {isFeatured ? <Badge variant="secondary">featured</Badge> : null}
+                    <h3 className="font-medium">{item.title}</h3>
+                    <Badge variant={item.status === 'published' ? 'default' : 'outline'}>{item.status}</Badge>
+                    {item.is_featured ? <Badge variant="secondary">featured</Badge> : null}
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">/{item.slug}</p>
                   {itemDescription ? <p className="mt-2 text-sm text-muted-foreground">{truncateText(itemDescription, 110)}</p> : null}
+                  {item.categories?.length ? (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {item.categories.map((category) => (
+                        <Badge key={category.id} variant="outline">
+                          {category.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 gap-1">
                   <Button type="button" size="icon" variant="ghost" onClick={() => onEdit(type, item)} aria-label="Edit">
@@ -200,20 +224,98 @@ function ContentList({
   );
 }
 
+function CategoryPicker({
+  categories,
+  selectedNames,
+  onChange
+}: {
+  categories: Category[];
+  selectedNames: string[];
+  onChange: (names: string[]) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const selectedSlugs = new Set(selectedNames.map(toSlug));
+  const filteredCategories = categories
+    .filter((category) => !selectedSlugs.has(category.slug))
+    .filter((category) => category.name.toLowerCase().includes(search.trim().toLowerCase()))
+    .slice(0, 8);
+
+  function addCategory(name: string) {
+    const trimmed = name.trim();
+    const slug = toSlug(trimmed);
+    if (!trimmed || selectedSlugs.has(slug)) return;
+    const existing = categories.find((category) => category.slug === slug);
+    onChange([...selectedNames, existing?.name ?? trimmed]);
+    setSearch('');
+  }
+
+  function removeCategory(name: string) {
+    const slug = toSlug(name);
+    onChange(selectedNames.filter((item) => toSlug(item) !== slug));
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    addCategory(search);
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border p-3">
+      <div>
+        <label className="text-sm font-medium">Categories</label>
+        <p className="text-xs text-muted-foreground">
+          Search existing categories or type a new one. If it already exists, the CMS reuses the same category; if not, it creates it on save.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {selectedNames.length === 0 ? <span className="text-sm text-muted-foreground">No categories selected.</span> : null}
+        {selectedNames.map((name) => (
+          <Badge key={toSlug(name)} variant="secondary" className="gap-1 pr-1">
+            {name}
+            <button type="button" className="rounded-full p-0.5 hover:bg-background/60" onClick={() => removeCategory(name)} aria-label={`Remove ${name}`}>
+              <X className="h-3 w-3" />
+            </button>
+          </Badge>
+        ))}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+        <Input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={handleKeyDown} placeholder="Search or add category, e.g. React" />
+        <Button type="button" variant="outline" onClick={() => addCategory(search)} disabled={!search.trim()}>
+          <Plus className="h-4 w-4" /> Add
+        </Button>
+      </div>
+      {filteredCategories.length ? (
+        <div className="flex flex-wrap gap-2">
+          {filteredCategories.map((category) => (
+            <Button key={category.id} type="button" size="sm" variant="outline" onClick={() => addCategory(category.name)}>
+              {category.name}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function AdminPage() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>('content');
   const [editor, setEditor] = useState<EditorState>(emptyEditor);
+  const [apiEditor, setApiEditor] = useState<ApiConnectionEditorState>(emptyApiEditor);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [blogImportUrl, setBlogImportUrl] = useState('');
+  const [githubImportUrl, setGithubImportUrl] = useState('');
+  const [markdownImportUrl, setMarkdownImportUrl] = useState('');
 
   const { data: posts = [] } = useQuery({ queryKey: ['admin', 'blog-posts'], queryFn: getAllBlogPosts });
   const { data: projects = [] } = useQuery({ queryKey: ['admin', 'projects'], queryFn: getAllProjects });
-  const { data: topics = [] } = useQuery({ queryKey: ['admin', 'topics'], queryFn: getTopics });
+  const { data: categories = [] } = useQuery({ queryKey: ['admin', 'categories'], queryFn: getCategories });
   const { data: shareSettings } = useQuery({ queryKey: ['admin', 'share-settings'], queryFn: getShareSettings });
+  const { data: apiConnections = [] } = useQuery({ queryKey: ['admin', 'social-api-connections'], queryFn: getSocialApiConnections });
+  const { data: shareQueue = [] } = useQuery({ queryKey: ['admin', 'share-queue'], queryFn: getShareQueue });
   const { data: siteSettings } = useQuery({ queryKey: ['admin', 'site-settings'], queryFn: getSiteSettings });
 
   const saveMutation = useMutation({
@@ -222,26 +324,13 @@ export function AdminPage() {
       const existingSlugs =
         state.type === 'blog'
           ? posts.filter((post) => post.id !== state.id).map((post) => post.slug)
-          : state.type === 'project'
-            ? projects.filter((project) => project.id !== state.id).map((project) => project.slug)
-            : topics.filter((topic) => topic.id !== state.id).map((topic) => topic.slug);
+          : projects.filter((project) => project.id !== state.id).map((project) => project.slug);
       const slug = makeUniqueSlug(rawSlug, existingSlugs);
       if (!state.title.trim() || !slug.trim()) throw new Error('Title and slug are required.');
 
-      if (state.type === 'topic') {
-        const payload = {
-          name: state.title.trim(),
-          slug,
-          description: state.description || null,
-          aliases: state.content
-            .split(',')
-            .map((item) => item.trim())
-            .filter(Boolean)
-        };
-        return state.id ? updateTopic(state.id, payload) : createTopic(payload);
-      }
-
       if (state.type === 'blog') {
+        const previousPost = posts.find((post) => post.id === state.id);
+        const shouldQueueShare = state.status === 'published' && shareSettings?.auto_share_on_publish && (!state.id || previousPost?.status !== 'published');
         const payload = {
           title: state.title.trim(),
           slug,
@@ -255,11 +344,11 @@ export function AdminPage() {
           sort_order: Number.isFinite(state.sortOrder) ? state.sortOrder : 100,
           meta_title: generateSeoTitle(state.title),
           meta_description: generateSeoDescription({ description: state.description, content: state.content }),
-          published_at: state.status === 'published' ? new Date().toISOString() : null
+          published_at: state.status === 'published' ? previousPost?.published_at ?? new Date().toISOString() : null
         };
         const saved = state.id ? await updateBlogPost(state.id, payload) : await createBlogPost(payload);
-        await replaceBlogPostTopics(saved.id, state.topicIds);
-        if (!state.id && state.status === 'published' && shareSettings?.auto_share_on_publish) {
+        const savedCategories = await replaceBlogPostCategories(saved.id, state.categoryNames);
+        if (shouldQueueShare) {
           await enqueueShareJobs({
             entityType: 'blog',
             entityId: saved.id,
@@ -268,13 +357,16 @@ export function AdminPage() {
               title: saved.title,
               description: generateSeoDescription({ description: saved.excerpt, content: saved.content }),
               url: getCanonicalUrl(`/blog/${saved.slug}`),
-              type: 'blog'
+              type: 'blog',
+              categories: savedCategories.map((category) => category.name)
             }
           });
         }
         return saved;
       }
 
+      const previousProject = projects.find((project) => project.id === state.id);
+      const shouldQueueShare = state.status === 'published' && shareSettings?.auto_share_on_publish && (!state.id || previousProject?.status !== 'published');
       const payload = {
         title: state.title.trim(),
         slug,
@@ -292,8 +384,8 @@ export function AdminPage() {
         meta_description: generateSeoDescription({ description: state.description, content: state.content })
       };
       const saved = state.id ? await updateProject(state.id, payload) : await createProject(payload);
-      await replaceProjectTopics(saved.id, state.topicIds);
-      if (!state.id && state.status === 'published' && shareSettings?.auto_share_on_publish) {
+      const savedCategories = await replaceProjectCategories(saved.id, state.categoryNames);
+      if (shouldQueueShare) {
         await enqueueShareJobs({
           entityType: 'project',
           entityId: saved.id,
@@ -302,14 +394,15 @@ export function AdminPage() {
             title: saved.title,
             description: generateSeoDescription({ description: saved.summary, content: saved.content }),
             url: getCanonicalUrl(`/projects/${saved.slug}`),
-            type: 'project'
+            type: 'project',
+            categories: savedCategories.map((category) => category.name)
           }
         });
       }
       return saved;
     },
     onSuccess: async () => {
-      setMessage('Saved successfully.');
+      setMessage('Saved successfully. Categories were reused or created automatically.');
       setError('');
       setEditor(emptyEditor);
       await queryClient.invalidateQueries();
@@ -357,43 +450,115 @@ export function AdminPage() {
     onError: (err) => setError(err instanceof Error ? err.message : 'Cannot save settings.')
   });
 
+  const apiConnectionMutation = useMutation({
+    mutationFn: async (state: ApiConnectionEditorState) => {
+      let extraConfig: Record<string, unknown> = {};
+      try {
+        extraConfig = JSON.parse(state.extraConfig || '{}') as Record<string, unknown>;
+      } catch {
+        throw new Error('Extra config must be valid JSON. Use {} if you do not need it.');
+      }
+      return upsertSocialApiConnection({
+        platform: state.platform,
+        label: state.label || null,
+        is_enabled: state.isEnabled,
+        api_base_url: state.apiBaseUrl || null,
+        api_code: state.apiCode || null,
+        api_token: state.apiToken || null,
+        api_secret: state.apiSecret || null,
+        account_id: state.accountId || null,
+        extra_config: extraConfig
+      });
+    },
+    onSuccess: async () => {
+      setMessage('Social API connection saved.');
+      setError('');
+      setApiEditor(emptyApiEditor);
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'social-api-connections'] });
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Cannot save social API connection.');
+      setMessage('');
+    }
+  });
+
+  const processorMutation = useMutation({
+    mutationFn: runSocialShareProcessor,
+    onSuccess: async (result) => {
+      setMessage(result.message ?? `Share processor finished. Processed: ${result.processed ?? 0}, failed: ${result.failed ?? 0}.`);
+      setError('');
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'share-queue'] });
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Cannot run process-social-share Edge Function. Deploy the function first.');
+      setMessage('');
+    }
+  });
+
+  const categoryDeleteMutation = useMutation({
+    mutationFn: deleteCategory,
+    onSuccess: async () => {
+      setMessage('Category deleted.');
+      setError('');
+      await queryClient.invalidateQueries();
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Cannot delete category.');
+      setMessage('');
+    }
+  });
+
   function getExistingSlugs(type: EditableType, currentId: string) {
     if (type === 'blog') return posts.filter((post) => post.id !== currentId).map((post) => post.slug);
-    if (type === 'project') return projects.filter((project) => project.id !== currentId).map((project) => project.slug);
-    return topics.filter((topic) => topic.id !== currentId).map((topic) => topic.slug);
+    return projects.filter((project) => project.id !== currentId).map((project) => project.slug);
   }
 
-  function applyImportedContent(imported: ImportedMarkdownContent, targetType: Extract<EditableType, 'blog' | 'project'>) {
+  function mergeCategoryNames(currentNames: string[], importedNames: string[] = []) {
+    const categoriesBySlug = new Map<string, string>();
+    [...currentNames, ...importedNames].forEach((name) => {
+      const slug = toSlug(name);
+      if (slug && !categoriesBySlug.has(slug)) categoriesBySlug.set(slug, name.trim());
+    });
+    return [...categoriesBySlug.values()];
+  }
+
+  function applyImportedContent(imported: ImportedMarkdownContent, targetType: EditableType) {
     setEditor((current) => {
       if (current.type !== targetType) return current;
 
-      const nextTitle = current.title || imported.title || current.title;
-      const shouldUpdateSlug = !current.slug || current.slug === toSlug(current.title);
-      const nextSlug = shouldUpdateSlug && nextTitle ? makeUniqueSlug(nextTitle, getExistingSlugs(current.type, current.id), current.slug) : current.slug;
+      const nextTitle = imported.title || current.title;
+      const importedSlug = imported.slug || (imported.title ? toSlug(imported.title) : '');
+      const shouldUpdateSlug = Boolean(importedSlug) && (!current.slug || current.slug === toSlug(current.title));
+      const nextSlug = shouldUpdateSlug ? makeUniqueSlug(importedSlug, getExistingSlugs(current.type, current.id), current.slug) : current.slug;
 
       return {
         ...current,
         title: nextTitle,
         slug: nextSlug,
-        description: current.description || imported.description || '',
+        description: imported.description ?? current.description,
         content: imported.content,
         contentSource: imported.source,
         sourceUrl: imported.sourceUrl,
         repoUrl: imported.repoUrl || current.repoUrl,
-        demoUrl: current.demoUrl || imported.demoUrl || ''
+        demoUrl: imported.demoUrl || current.demoUrl,
+        imageUrl: imported.imageUrl || current.imageUrl,
+        categoryNames: mergeCategoryNames(current.categoryNames, imported.categoryNames),
+        status: imported.status || current.status,
+        isFeatured: imported.isFeatured ?? current.isFeatured,
+        sortOrder: imported.sortOrder ?? current.sortOrder
       };
     });
-    setMessage(`Imported ${imported.source === 'github_readme' ? 'GitHub README' : 'Markdown'} content successfully.`);
+    setMessage(`Imported ${imported.source === 'github_readme' ? 'GitHub README' : 'Markdown'} into all matching inputs successfully.`);
     setError('');
   }
 
   const contentImportMutation = useMutation({
-    mutationFn: async (input: { type: 'project-readme' | 'blog-url'; url: string }) => {
-      if (input.type === 'project-readme') return fetchGitHubReadmeFromRepo(input.url);
+    mutationFn: async (input: { source: 'github-readme' | 'markdown-url'; targetType: EditableType; url: string }) => {
+      if (input.source === 'github-readme') return fetchGitHubReadmeFromRepo(input.url);
       return fetchMarkdownFromUrl(input.url);
     },
     onSuccess: (imported, variables) => {
-      applyImportedContent(imported, variables.type === 'project-readme' ? 'project' : 'blog');
+      applyImportedContent(imported, variables.targetType);
     },
     onError: (err) => {
       setError(err instanceof Error ? err.message : 'Import failed.');
@@ -414,17 +579,18 @@ export function AdminPage() {
     [editor.title, editor.description, editor.content]
   );
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     saveMutation.mutate(editor);
   }
 
   function handleTypeChange(type: EditableType) {
     setEditor({ ...emptyEditor, type });
-    setBlogImportUrl('');
+    setGithubImportUrl('');
+    setMarkdownImportUrl('');
   }
 
-  function handleEdit(type: EditableType, item: BlogPost | Project | Topic) {
+  function handleEdit(type: EditableType, item: BlogPost | Project) {
     setEditor(editorFromItem(type, item));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -434,7 +600,6 @@ export function AdminPage() {
     try {
       if (type === 'blog') await deleteBlogPost(id);
       if (type === 'project') await deleteProject(id);
-      if (type === 'topic') await deleteTopic(id);
       setMessage('Deleted successfully.');
       await queryClient.invalidateQueries();
     } catch (err) {
@@ -454,14 +619,14 @@ export function AdminPage() {
     imageUploadMutation.mutate(file);
   }
 
-  async function handleBlogFileImport(event: ChangeEvent<HTMLInputElement>) {
+  async function handleMarkdownFileImport(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
 
     try {
       const imported = await readMarkdownFile(file);
-      applyImportedContent(imported, 'blog');
+      applyImportedContent(imported, editor.type);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Markdown file import failed.');
       setMessage('');
@@ -481,15 +646,6 @@ export function AdminPage() {
       secondary_cta_label: String(formData.get('secondary_cta_label') || ''),
       secondary_cta_href: String(formData.get('secondary_cta_href') || '')
     });
-  }
-
-  function toggleTopic(topicId: string) {
-    setEditor((current) => ({
-      ...current,
-      topicIds: current.topicIds.includes(topicId)
-        ? current.topicIds.filter((id) => id !== topicId)
-        : [...current.topicIds, topicId]
-    }));
   }
 
   function togglePlatform(platform: SharePlatform) {
@@ -516,24 +672,25 @@ export function AdminPage() {
             <p className="mt-3 text-muted-foreground">Logged in as {user?.email}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant={tab === 'content' ? 'default' : 'outline'} onClick={() => setTab('content')}>
+            <Button type="button" variant={tab === 'content' ? 'default' : 'outline'} onClick={() => setTab('content')}>
               <Plus className="h-4 w-4" /> Content
             </Button>
-            <Button variant={tab === 'site' ? 'default' : 'outline'} onClick={() => setTab('site')}>
+            <Button type="button" variant={tab === 'site' ? 'default' : 'outline'} onClick={() => setTab('site')}>
               <ImageIcon className="h-4 w-4" /> Site CMS
             </Button>
-            <Button variant={tab === 'settings' ? 'default' : 'outline'} onClick={() => setTab('settings')}>
-              <Settings className="h-4 w-4" /> Share settings
+            <Button type="button" variant={tab === 'settings' ? 'default' : 'outline'} onClick={() => setTab('settings')}>
+              <Settings className="h-4 w-4" /> Auto-share
             </Button>
-            <Button variant="secondary" onClick={handleLogout}>
+            <Button type="button" variant="secondary" onClick={handleLogout}>
               <LogOut className="h-4 w-4" /> Logout
             </Button>
           </div>
         </div>
 
-        <div className="mb-6 grid gap-4 md:grid-cols-3">
+        <div className="mb-6 grid gap-4 md:grid-cols-4">
           <Card><CardHeader><CardTitle>{posts.length}</CardTitle><CardDescription>Blog posts</CardDescription></CardHeader></Card>
           <Card><CardHeader><CardTitle>{projects.length}</CardTitle><CardDescription>Projects</CardDescription></CardHeader></Card>
+          <Card><CardHeader><CardTitle>{categories.length}</CardTitle><CardDescription>Categories</CardDescription></CardHeader></Card>
           <Card><CardHeader><CardTitle>{totalPublished}</CardTitle><CardDescription>Published items</CardDescription></CardHeader></Card>
         </div>
 
@@ -555,32 +712,31 @@ export function AdminPage() {
             <Card>
               <CardHeader>
                 <CardTitle>{editor.id ? 'Edit content' : 'Create content'}</CardTitle>
-                <CardDescription>Manage blog posts, projects, topics, SEO, featured order, rich content embeds, and compressed images from one CMS form.</CardDescription>
+                <CardDescription>
+                  Manage blog posts, projects, searchable categories, SEO, featured order, stateless imports, and compressed images from one CMS form.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Type</label>
-                      <Select value={editor.type} onChange={(event) => handleTypeChange(event.target.value as EditableType)} disabled={Boolean(editor.id)}>
-                        <option value="blog">Blog</option>
+                      <Select value={editor.type} onChange={(event) => handleTypeChange(event.target.value as EditableType)}>
+                        <option value="blog">Blog post</option>
                         <option value="project">Project</option>
-                        <option value="topic">Topic</option>
                       </Select>
                     </div>
-                    {editor.type !== 'topic' ? (
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Status</label>
-                        <Select value={editor.status} onChange={(event) => setEditor({ ...editor, status: event.target.value as 'draft' | 'published' })}>
-                          <option value="draft">Draft</option>
-                          <option value="published">Published</option>
-                        </Select>
-                      </div>
-                    ) : null}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Status</label>
+                      <Select value={editor.status} onChange={(event) => setEditor({ ...editor, status: event.target.value as 'draft' | 'published' })}>
+                        <option value="draft">Draft</option>
+                        <option value="published">Published</option>
+                      </Select>
+                    </div>
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Title / name</label>
+                    <label className="text-sm font-medium">Title</label>
                     <Input
                       value={editor.title}
                       onChange={(event) => {
@@ -599,15 +755,7 @@ export function AdminPage() {
                         type="button"
                         size="sm"
                         variant="ghost"
-                        onClick={() => {
-                          const existingSlugs =
-                            editor.type === 'blog'
-                              ? posts.filter((post) => post.id !== editor.id).map((post) => post.slug)
-                              : editor.type === 'project'
-                                ? projects.filter((project) => project.id !== editor.id).map((project) => project.slug)
-                                : topics.filter((topic) => topic.id !== editor.id).map((topic) => topic.slug);
-                          setEditor({ ...editor, slug: makeUniqueSlug(editor.title, existingSlugs) });
-                        }}
+                        onClick={() => setEditor({ ...editor, slug: makeUniqueSlug(editor.title, getExistingSlugs(editor.type, editor.id)) })}
                       >
                         <RefreshCw className="h-3.5 w-3.5" /> Regenerate
                       </Button>
@@ -615,219 +763,190 @@ export function AdminPage() {
                     <Input value={editor.slug} onChange={(event) => setEditor({ ...editor, slug: toSlug(event.target.value) })} placeholder="my-article-title" />
                     {editor.slug ? (
                       <p className="text-xs text-muted-foreground">
-                        {editor.type === 'topic' ? 'Internal topic slug' : 'Public URL'}: /{editor.type === 'blog' ? 'blog/' : editor.type === 'project' ? 'projects/' : 'topics/'}{editor.slug}
+                        Public URL: /{editor.type === 'blog' ? 'blog/' : 'projects/'}{editor.slug}
                       </p>
                     ) : null}
                   </div>
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Description {editor.type === 'topic' ? '' : '/ excerpt'}</label>
+                    <label className="text-sm font-medium">Description / excerpt</label>
                     <Textarea value={editor.description} onChange={(event) => setEditor({ ...editor, description: event.target.value })} />
                   </div>
 
-                  {editor.type !== 'topic' ? (
-                    <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                        <div>
-                          <label className="text-sm font-medium">Stateless content source</label>
-                          <p className="text-xs text-muted-foreground">
-                            Manual content is saved in Supabase. GitHub README and Markdown URL modes can refresh content from the source at page load, with saved content as fallback.
-                          </p>
-                        </div>
-                        <Select
-                          className="sm:w-52"
-                          value={editor.contentSource}
-                          onChange={(event) => {
-                            const nextSource = event.target.value as ContentSource;
-                            setEditor({
-                              ...editor,
-                              contentSource: nextSource,
-                              sourceUrl:
-                                nextSource === 'manual'
-                                  ? ''
-                                  : nextSource === 'github_readme'
-                                    ? editor.sourceUrl || editor.repoUrl
-                                    : editor.sourceUrl || blogImportUrl
-                            });
-                          }}
-                        >
-                          <option value="manual">Manual CMS content</option>
-                          {editor.type === 'project' ? <option value="github_readme">GitHub README</option> : null}
-                          {editor.type === 'blog' ? <option value="markdown_url">Markdown URL</option> : null}
-                        </Select>
-                      </div>
-
-                      {editor.type === 'project' ? (
-                        <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                          <Input
-                            value={editor.repoUrl}
-                            onChange={(event) => {
-                              const repoUrl = event.target.value;
-                              setEditor({
-                                ...editor,
-                                repoUrl,
-                                sourceUrl: editor.contentSource === 'github_readme' ? repoUrl : editor.sourceUrl
-                              });
-                            }}
-                            placeholder="https://github.com/user/repository"
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={contentImportMutation.isPending || !editor.repoUrl.trim()}
-                            onClick={() => contentImportMutation.mutate({ type: 'project-readme', url: editor.repoUrl })}
-                          >
-                            {contentImportMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                            Import README
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                            <Input
-                              value={blogImportUrl}
-                              onChange={(event) => setBlogImportUrl(event.target.value)}
-                              placeholder="https://raw.githubusercontent.com/user/repo/main/post.md"
-                            />
-                            <Button
-                              type="button"
-                              variant="outline"
-                              disabled={contentImportMutation.isPending || !blogImportUrl.trim()}
-                              onClick={() => contentImportMutation.mutate({ type: 'blog-url', url: blogImportUrl })}
-                            >
-                              {contentImportMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                              Import URL
-                            </Button>
-                          </div>
-                          <Button type="button" variant="outline" asChild>
-                            <label className="cursor-pointer">
-                              <Upload className="h-4 w-4" />
-                              Import .md file
-                              <input type="file" accept=".md,.markdown,text/markdown,text/plain" className="sr-only" onChange={handleBlogFileImport} />
-                            </label>
-                          </Button>
-                        </div>
-                      )}
-
-                      {editor.sourceUrl ? <p className="break-all text-xs text-muted-foreground">Source: {editor.sourceUrl}</p> : null}
-                    </div>
-                  ) : null}
-
-                  {editor.type === 'topic' ? (
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Aliases, comma separated</label>
-                      <Textarea className="min-h-32" value={editor.content} onChange={(event) => setEditor({ ...editor, content: event.target.value })} />
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
+                  <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                       <div>
-                        <label className="text-sm font-medium">CMS content</label>
+                        <label className="text-sm font-medium">Stateless content source</label>
                         <p className="text-xs text-muted-foreground">
-                          WordPress/Blogger-style input using Markdown and embeds. Use toolbar buttons for bold text, links, images, YouTube, and audio.
+                          Manual content is saved in Supabase. GitHub README and Markdown URL modes can refresh content from the source at page load, with saved content as fallback.
                         </p>
                       </div>
-                      <CmsRichTextEditor
-                        value={editor.content}
-                        onChange={(content) => setEditor({ ...editor, content })}
-                        uploadFolder={editor.type === 'blog' ? 'blog-content' : 'project-content'}
-                        onMessage={(nextMessage) => {
-                          setMessage(nextMessage);
-                          setError('');
+                      <Select
+                        className="sm:w-52"
+                        value={editor.contentSource}
+                        onChange={(event) => {
+                          const nextSource = event.target.value as ContentSource;
+                          setEditor({
+                            ...editor,
+                            contentSource: nextSource,
+                            sourceUrl:
+                              nextSource === 'manual'
+                                ? ''
+                                : nextSource === 'github_readme'
+                                  ? editor.sourceUrl || editor.repoUrl || githubImportUrl
+                                  : editor.sourceUrl || markdownImportUrl
+                          });
                         }}
-                        onError={(nextError) => {
-                          setError(nextError);
-                          setMessage('');
-                        }}
-                      />
+                      >
+                        <option value="manual">Manual CMS content</option>
+                        <option value="github_readme">GitHub README</option>
+                        <option value="markdown_url">Markdown URL</option>
+                      </Select>
                     </div>
-                  )}
 
-                  {editor.type !== 'topic' ? (
-                    <div className="grid gap-4 rounded-lg border p-3 sm:grid-cols-2">
-                      <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={editor.isFeatured}
-                          onChange={(event) => setEditor({ ...editor, isFeatured: event.target.checked })}
-                          className="h-4 w-4 accent-primary"
-                        />
-                        Show as featured
-                      </label>
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Sort order</label>
+                    <div className="space-y-2">
+                      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
                         <Input
-                          type="number"
-                          value={editor.sortOrder}
-                          onChange={(event) => setEditor({ ...editor, sortOrder: Number(event.target.value) })}
+                          value={editor.type === 'project' ? editor.repoUrl : githubImportUrl}
+                          onChange={(event) => {
+                            const url = event.target.value;
+                            if (editor.type === 'project') {
+                              setEditor({ ...editor, repoUrl: url, sourceUrl: editor.contentSource === 'github_readme' ? url : editor.sourceUrl });
+                            } else {
+                              setGithubImportUrl(url);
+                              if (editor.contentSource === 'github_readme') setEditor({ ...editor, sourceUrl: url });
+                            }
+                          }}
+                          placeholder="GitHub repository URL, e.g. https://github.com/user/repository"
                         />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={contentImportMutation.isPending || !(editor.type === 'project' ? editor.repoUrl : githubImportUrl).trim()}
+                          onClick={() =>
+                            contentImportMutation.mutate({
+                              source: 'github-readme',
+                              targetType: editor.type,
+                              url: editor.type === 'project' ? editor.repoUrl : githubImportUrl
+                            })
+                          }
+                        >
+                          {contentImportMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                          Import README
+                        </Button>
                       </div>
+                      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                        <Input
+                          value={markdownImportUrl}
+                          onChange={(event) => {
+                            const url = event.target.value;
+                            setMarkdownImportUrl(url);
+                            if (editor.contentSource === 'markdown_url') setEditor({ ...editor, sourceUrl: url });
+                          }}
+                          placeholder="Markdown URL, e.g. https://raw.githubusercontent.com/user/repo/main/post.md"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={contentImportMutation.isPending || !markdownImportUrl.trim()}
+                          onClick={() => contentImportMutation.mutate({ source: 'markdown-url', targetType: editor.type, url: markdownImportUrl })}
+                        >
+                          {contentImportMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                          Import Markdown
+                        </Button>
+                      </div>
+                      <Button type="button" variant="outline" asChild>
+                        <label className="cursor-pointer">
+                          <Upload className="h-4 w-4" />
+                          Import .md file
+                          <input type="file" accept=".md,.markdown,text/markdown,text/plain" className="sr-only" onChange={handleMarkdownFileImport} />
+                        </label>
+                      </Button>
+                      <p className="text-xs text-muted-foreground">
+                        Import fills every matching input: title, slug, description, content, categories, image URL, repo URL, demo URL, status, featured flag, and sort order when available.
+                      </p>
                     </div>
-                  ) : null}
 
-                  {editor.type !== 'topic' ? (
-                    <div className="space-y-2 rounded-lg border p-3">
-                      <label className="text-sm font-medium">Connected topics</label>
-                      {topics.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">Create topics first, then select them here.</p>
-                      ) : (
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          {topics.map((topic) => (
-                            <label key={topic.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={editor.topicIds.includes(topic.id)}
-                                onChange={() => toggleTopic(topic.id)}
-                                className="h-4 w-4 accent-primary"
-                              />
-                              {topic.name}
-                            </label>
-                          ))}
-                        </div>
-                      )}
+                    {editor.sourceUrl ? <p className="break-all text-xs text-muted-foreground">Source: {editor.sourceUrl}</p> : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-sm font-medium">CMS content</label>
+                      <p className="text-xs text-muted-foreground">
+                        WordPress/Blogger-style input using Markdown and embeds. Use toolbar buttons for bold text, links, images, YouTube, and audio.
+                      </p>
                     </div>
-                  ) : null}
+                    <CmsRichTextEditor
+                      value={editor.content}
+                      onChange={(content) => setEditor({ ...editor, content })}
+                      uploadFolder={editor.type === 'blog' ? 'blog-content' : 'project-content'}
+                      onMessage={(nextMessage) => {
+                        setMessage(nextMessage);
+                        setError('');
+                      }}
+                      onError={(nextError) => {
+                        setError(nextError);
+                        setMessage('');
+                      }}
+                    />
+                  </div>
 
-                  {editor.type !== 'topic' ? (
-                    <>
-                      <div className="space-y-3 rounded-lg border p-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <label className="text-sm font-medium">Cover image upload</label>
-                            <p className="text-xs text-muted-foreground">Uploads to Supabase Storage as WebP/JPEG after browser-side compression.</p>
-                          </div>
-                          <Button type="button" variant="outline" disabled={imageUploadMutation.isPending} asChild>
-                            <label className="cursor-pointer">
-                              {imageUploadMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                              Upload
-                              <input type="file" accept="image/*" onChange={handleImageChange} className="sr-only" />
-                            </label>
-                          </Button>
-                        </div>
-                        <Input value={editor.imageUrl} onChange={(event) => setEditor({ ...editor, imageUrl: event.target.value })} placeholder="Or paste image URL" />
-                        {editor.imageUrl ? (
-                          <div className="overflow-hidden rounded-lg border bg-muted">
-                            <img src={editor.imageUrl} alt="Preview" className="max-h-52 w-full object-cover" />
-                          </div>
-                        ) : null}
+                  <CategoryPicker categories={categories} selectedNames={editor.categoryNames} onChange={(categoryNames) => setEditor({ ...editor, categoryNames })} />
+
+                  <div className="grid gap-4 rounded-lg border p-3 sm:grid-cols-2">
+                    <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={editor.isFeatured}
+                        onChange={(event) => setEditor({ ...editor, isFeatured: event.target.checked })}
+                        className="h-4 w-4 accent-primary"
+                      />
+                      Show as featured
+                    </label>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Sort order</label>
+                      <Input type="number" value={editor.sortOrder} onChange={(event) => setEditor({ ...editor, sortOrder: Number(event.target.value) })} />
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 rounded-lg border p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <label className="text-sm font-medium">Cover image upload</label>
+                        <p className="text-xs text-muted-foreground">Uploads to Supabase Storage as WebP/JPEG after browser-side compression.</p>
                       </div>
-
-                      <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
-                        <div>
-                          <label className="text-sm font-medium">Automatic SEO preview</label>
-                          <p className="text-xs text-muted-foreground">SEO title and description are generated from the title, description/excerpt, and CMS content when you save.</p>
-                        </div>
-                        <div className="space-y-1 rounded-md bg-background p-3 text-sm">
-                          <p className="font-semibold text-primary">{seoPreview.title}</p>
-                          <p className="text-muted-foreground">{seoPreview.description}</p>
-                        </div>
+                      <Button type="button" variant="outline" disabled={imageUploadMutation.isPending} asChild>
+                        <label className="cursor-pointer">
+                          {imageUploadMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                          Upload
+                          <input type="file" accept="image/*" onChange={handleImageChange} className="sr-only" />
+                        </label>
+                      </Button>
+                    </div>
+                    <Input value={editor.imageUrl} onChange={(event) => setEditor({ ...editor, imageUrl: event.target.value })} placeholder="Or paste image URL" />
+                    {editor.imageUrl ? (
+                      <div className="overflow-hidden rounded-lg border bg-muted">
+                        <img src={editor.imageUrl} alt="Preview" className="max-h-52 w-full object-cover" />
                       </div>
+                    ) : null}
+                  </div>
 
-                      {editor.type === 'project' ? (
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">Demo URL</label>
-                          <Input value={editor.demoUrl} onChange={(event) => setEditor({ ...editor, demoUrl: event.target.value })} />
-                        </div>
-                      ) : null}
-                    </>
+                  <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+                    <div>
+                      <label className="text-sm font-medium">Automatic SEO preview</label>
+                      <p className="text-xs text-muted-foreground">SEO title and description are generated from the title, description/excerpt, and CMS content when you save.</p>
+                    </div>
+                    <div className="space-y-1 rounded-md bg-background p-3 text-sm">
+                      <p className="font-semibold text-primary">{seoPreview.title}</p>
+                      <p className="text-muted-foreground">{seoPreview.description}</p>
+                    </div>
+                  </div>
+
+                  {editor.type === 'project' ? (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Demo URL</label>
+                      <Input value={editor.demoUrl} onChange={(event) => setEditor({ ...editor, demoUrl: event.target.value })} />
+                    </div>
                   ) : null}
 
                   <div className="flex gap-2 pt-2">
@@ -845,80 +964,188 @@ export function AdminPage() {
             <div className="grid gap-6">
               <ContentList title="Blog posts" items={posts} type="blog" onEdit={handleEdit} onDelete={handleDelete} />
               <ContentList title="Projects" items={projects} type="project" onEdit={handleEdit} onDelete={handleDelete} />
-              <ContentList title="Topics" items={topics} type="topic" onEdit={handleEdit} onDelete={handleDelete} />
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Categories</CardTitle>
+                  <CardDescription>Created automatically from blog/project category input.</CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-wrap gap-2">
+                  {categories.length === 0 ? <p className="text-sm text-muted-foreground">No categories yet.</p> : null}
+                  {categories.map((category) => (
+                    <Badge key={category.id} variant="outline" className="gap-1 pr-1">
+                      {category.name}
+                      <button
+                        type="button"
+                        className="rounded-full p-0.5 hover:bg-muted"
+                        onClick={() => {
+                          if (confirm(`Delete category ${category.name}?`)) categoryDeleteMutation.mutate(category.id);
+                        }}
+                        aria-label={`Delete ${category.name}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </CardContent>
+              </Card>
             </div>
           </div>
         ) : null}
 
-        {tab === 'site' && siteSettings ? (
-          <SiteSettingsForm settings={siteSettings} onSubmit={handleSiteSubmit} isPending={siteMutation.isPending} />
-        ) : null}
+        {tab === 'site' && siteSettings ? <SiteSettingsForm settings={siteSettings} onSubmit={handleSiteSubmit} isPending={siteMutation.isPending} /> : null}
 
         {tab === 'settings' && shareSettings ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Share settings</CardTitle>
-              <CardDescription>Queue share jobs when content is published and see what is still required for real auto-posting.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <Alert>
-                <AlertTitle>What is needed for true auto-share?</AlertTitle>
-                <AlertDescription>
-                  This CMS can queue share jobs, but real automatic posting needs a backend worker or Supabase Edge Function with private API credentials.
-                  Do not put LinkedIn, X, Facebook, SMTP, or Telegram secrets in Vite frontend env variables. See docs/social-auto-share-requirements.md.
-                </AlertDescription>
-              </Alert>
-              <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+          <div className="grid gap-6 lg:grid-cols-[1fr_0.85fr]">
+            <Card>
+              <CardHeader>
+                <CardTitle>Auto-share settings</CardTitle>
+                <CardDescription>Queue share jobs when blog/project content becomes published.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <Alert>
+                  <AlertTitle>Important security note</AlertTitle>
+                  <AlertDescription>
+                    The API code/token fields are stored in the database because you asked for database-based API config. For a public production app, process posting only inside a Supabase Edge Function with service-role access. Do not call social media APIs with private tokens from the Vite frontend.
+                  </AlertDescription>
+                </Alert>
+                <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+                  <div>
+                    <h3 className="font-medium">Auto queue share jobs on publish</h3>
+                    <p className="text-sm text-muted-foreground">When enabled, newly published blog/project items create rows in social_share_queue.</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant={shareSettings.auto_share_on_publish ? 'default' : 'outline'}
+                    onClick={() =>
+                      settingsMutation.mutate({
+                        auto_share_on_publish: !shareSettings.auto_share_on_publish,
+                        active_platforms: shareSettings.active_platforms,
+                        default_message_template: shareSettings.default_message_template
+                      })
+                    }
+                  >
+                    {shareSettings.auto_share_on_publish ? 'Enabled' : 'Disabled'}
+                  </Button>
+                </div>
+
                 <div>
-                  <h3 className="font-medium">Auto queue share jobs on publish</h3>
-                  <p className="text-sm text-muted-foreground">This creates ready-to-share rows in social_share_queue. It does not auto-post without API tokens.</p>
+                  <h3 className="mb-3 font-medium">Active platforms</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {platforms.map((platform) => (
+                      <Button key={platform} type="button" variant={shareSettings.active_platforms.includes(platform) ? 'default' : 'outline'} onClick={() => togglePlatform(platform)}>
+                        {platform === 'x' ? 'X / Twitter' : platform}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
-                <Button
-                  variant={shareSettings.auto_share_on_publish ? 'default' : 'outline'}
-                  onClick={() =>
+
+                <Separator />
+
+                <form
+                  className="space-y-3"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const formData = new FormData(event.currentTarget);
                     settingsMutation.mutate({
-                      auto_share_on_publish: !shareSettings.auto_share_on_publish,
+                      auto_share_on_publish: shareSettings.auto_share_on_publish,
                       active_platforms: shareSettings.active_platforms,
-                      default_message_template: shareSettings.default_message_template
-                    })
-                  }
+                      default_message_template: String(formData.get('template') || '')
+                    });
+                  }}
                 >
-                  {shareSettings.auto_share_on_publish ? 'Enabled' : 'Disabled'}
+                  <label className="text-sm font-medium">Default message template</label>
+                  <Textarea name="template" defaultValue={shareSettings.default_message_template} />
+                  <p className="text-xs text-muted-foreground">Available variables: {'{{title}}'}, {'{{description}}'}, {'{{url}}'}, {'{{type}}'}, {'{{categories}}'}</p>
+                  <Button type="submit" disabled={settingsMutation.isPending}>Save settings</Button>
+                </form>
+
+                <Button type="button" variant="outline" disabled={processorMutation.isPending} onClick={() => processorMutation.mutate()}>
+                  {processorMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
+                  Run share processor
                 </Button>
-              </div>
+              </CardContent>
+            </Card>
 
-              <div>
-                <h3 className="mb-3 font-medium">Active platforms</h3>
-                <div className="flex flex-wrap gap-2">
-                  {platforms.map((platform) => (
-                    <Button key={platform} variant={shareSettings.active_platforms.includes(platform) ? 'default' : 'outline'} onClick={() => togglePlatform(platform)}>
-                      {platform === 'x' ? 'X / Twitter' : platform}
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Social API connection</CardTitle>
+                  <CardDescription>Save API code/token per platform. Existing platform values are reused through database upsert.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <form
+                    className="space-y-3"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      apiConnectionMutation.mutate(apiEditor);
+                    }}
+                  >
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Platform</label>
+                        <Select value={apiEditor.platform} onChange={(event) => setApiEditor({ ...apiEditor, platform: event.target.value as SharePlatform })}>
+                          {platforms.map((platform) => <option key={platform} value={platform}>{platform === 'x' ? 'X / Twitter' : platform}</option>)}
+                        </Select>
+                      </div>
+                      <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                        <input type="checkbox" checked={apiEditor.isEnabled} onChange={(event) => setApiEditor({ ...apiEditor, isEnabled: event.target.checked })} className="h-4 w-4 accent-primary" />
+                        Enabled
+                      </label>
+                    </div>
+                    <Input value={apiEditor.label} onChange={(event) => setApiEditor({ ...apiEditor, label: event.target.value })} placeholder="Label, e.g. personal LinkedIn" />
+                    <Input value={apiEditor.apiBaseUrl} onChange={(event) => setApiEditor({ ...apiEditor, apiBaseUrl: event.target.value })} placeholder="API base URL / endpoint" />
+                    <Input value={apiEditor.accountId} onChange={(event) => setApiEditor({ ...apiEditor, accountId: event.target.value })} placeholder="Account ID / page ID / author URN" />
+                    <Input value={apiEditor.apiCode} onChange={(event) => setApiEditor({ ...apiEditor, apiCode: event.target.value })} placeholder="API code / app code" />
+                    <Input type="password" value={apiEditor.apiToken} onChange={(event) => setApiEditor({ ...apiEditor, apiToken: event.target.value })} placeholder="Access token" />
+                    <Input type="password" value={apiEditor.apiSecret} onChange={(event) => setApiEditor({ ...apiEditor, apiSecret: event.target.value })} placeholder="Secret / refresh token / app secret" />
+                    <Textarea value={apiEditor.extraConfig} onChange={(event) => setApiEditor({ ...apiEditor, extraConfig: event.target.value })} className="min-h-24 font-mono text-xs" />
+                    <Button type="submit" disabled={apiConnectionMutation.isPending}>
+                      <Save className="h-4 w-4" /> {apiConnectionMutation.isPending ? 'Saving...' : 'Save connection'}
                     </Button>
+                  </form>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Saved API connections</CardTitle>
+                  <CardDescription>{apiConnections.length} platform configs</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {apiConnections.length === 0 ? <p className="text-sm text-muted-foreground">No API connections saved yet.</p> : null}
+                  {apiConnections.map((connection) => (
+                    <button key={connection.id} type="button" className="block w-full rounded-lg border p-3 text-left hover:bg-muted/50" onClick={() => setApiEditor(apiEditorFromConnection(connection))}>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium">{connection.platform === 'x' ? 'X / Twitter' : connection.platform}</span>
+                        <Badge variant={connection.is_enabled ? 'default' : 'outline'}>{connection.is_enabled ? 'enabled' : 'disabled'}</Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">{connection.label || connection.account_id || 'No label'}</p>
+                    </button>
                   ))}
-                </div>
-              </div>
+                </CardContent>
+              </Card>
 
-              <Separator />
-
-              <form
-                className="space-y-3"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  const formData = new FormData(event.currentTarget);
-                  settingsMutation.mutate({
-                    auto_share_on_publish: shareSettings.auto_share_on_publish,
-                    active_platforms: shareSettings.active_platforms,
-                    default_message_template: String(formData.get('template') || '')
-                  });
-                }}
-              >
-                <label className="text-sm font-medium">Default message template</label>
-                <Textarea name="template" defaultValue={shareSettings.default_message_template} />
-                <p className="text-xs text-muted-foreground">Available variables: {'{{title}}'}, {'{{description}}'}, {'{{url}}'}, {'{{type}}'}</p>
-                <Button type="submit" disabled={settingsMutation.isPending}>Save settings</Button>
-              </form>
-            </CardContent>
-          </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Recent share queue</CardTitle>
+                  <CardDescription>Last {shareQueue.length} queued posts</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {shareQueue.length === 0 ? <p className="text-sm text-muted-foreground">No queued share jobs yet.</p> : null}
+                  {shareQueue.slice(0, 8).map((item) => (
+                    <div key={item.id} className="rounded-lg border p-3 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-medium">{item.platform === 'x' ? 'X / Twitter' : item.platform}</span>
+                        <Badge variant={item.status === 'sent' ? 'default' : item.status === 'failed' ? 'destructive' : 'outline'}>{item.status}</Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">{String(item.payload?.title ?? item.entity_id)}</p>
+                      {item.error_message ? <p className="mt-1 text-xs text-destructive">{item.error_message}</p> : null}
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
         ) : null}
       </section>
     </>

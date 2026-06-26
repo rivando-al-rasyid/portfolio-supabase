@@ -8,7 +8,7 @@ export function GraphPage() {
 
   return (
     <>
-      <SEO title="Knowledge Graph" description="Interactive map of posts, projects, and topics." path="/graph" />
+      <SEO title="Knowledge Graph" description="Interactive map of posts, projects, and categories." path="/graph" />
       <section className="mx-auto max-w-6xl px-4 py-10">
         <div className="mb-8 max-w-2xl">
           <p className="text-sm font-semibold uppercase tracking-[0.25em] text-primary">Graph</p>

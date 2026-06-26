@@ -1,4 +1,4 @@
-import type { BlogPost, GraphData, GraphEdge, GraphNode, Project, Topic } from '../types/content';
+import type { BlogPost, Category, GraphData, GraphEdge, GraphNode, Project } from '../types/content';
 
 function keywords(value: string) {
   return new Set(
@@ -22,7 +22,7 @@ function addEdge(edges: Map<string, GraphEdge>, source: string, target: string, 
   edges.set(key, { source, target, weight, reason });
 }
 
-export function buildGraphData(posts: BlogPost[], projects: Project[], topics: Topic[]): GraphData {
+export function buildGraphData(posts: BlogPost[], projects: Project[], categories: Category[]): GraphData {
   const nodes: GraphNode[] = [
     ...posts.map((post) => ({
       id: `blog:${post.id}`,
@@ -38,21 +38,21 @@ export function buildGraphData(posts: BlogPost[], projects: Project[], topics: T
       slug: project.slug,
       description: project.summary
     })),
-    ...topics.map((topic) => ({
-      id: `topic:${topic.id}`,
-      type: 'topic' as const,
-      label: topic.name,
-      slug: topic.slug,
-      description: topic.description
+    ...categories.map((category) => ({
+      id: `category:${category.id}`,
+      type: 'category' as const,
+      label: category.name,
+      slug: category.slug,
+      description: null
     }))
   ];
 
   const edges = new Map<string, GraphEdge>();
   posts.forEach((post) => {
-    post.topics?.forEach((topic) => addEdge(edges, `blog:${post.id}`, `topic:${topic.id}`, 3, 'topic'));
+    post.categories?.forEach((category) => addEdge(edges, `blog:${post.id}`, `category:${category.id}`, 3, 'category'));
   });
   projects.forEach((project) => {
-    project.topics?.forEach((topic) => addEdge(edges, `project:${project.id}`, `topic:${topic.id}`, 3, 'topic'));
+    project.categories?.forEach((category) => addEdge(edges, `project:${project.id}`, `category:${category.id}`, 3, 'category'));
   });
 
   const contentNodes = [

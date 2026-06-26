@@ -2,19 +2,19 @@ import { type LoaderFunctionArgs } from 'react-router-dom';
 import { buildGraphData } from '../../lib/graphBuilder';
 import {
   getBlogPostBySlug,
+  getCategories,
   getProjectBySlug,
   getPublishedBlogPosts,
   getPublishedProjects,
-  getSiteSettings,
-  getTopics
+  getSiteSettings
 } from '../../lib/contentService';
-import type { BlogPost, GraphData, Project, SiteSettings, Topic } from '../../types/content';
+import type { BlogPost, Category, GraphData, Project, SiteSettings } from '../../types/content';
 
 export interface HomeLoaderData {
   site: SiteSettings;
   posts: BlogPost[];
   projects: Project[];
-  topics: Topic[];
+  categories: Category[];
   graphData: GraphData;
 }
 
@@ -39,13 +39,9 @@ export interface GraphLoaderData {
 }
 
 export async function loadPublishedContent() {
-  const [posts, projects, topics] = await Promise.all([
-    getPublishedBlogPosts(),
-    getPublishedProjects(),
-    getTopics()
-  ]);
+  const [posts, projects, categories] = await Promise.all([getPublishedBlogPosts(), getPublishedProjects(), getCategories()]);
 
-  return { posts, projects, topics };
+  return { posts, projects, categories };
 }
 
 export async function homeLoader(): Promise<HomeLoaderData> {
@@ -55,8 +51,8 @@ export async function homeLoader(): Promise<HomeLoaderData> {
     site,
     posts: content.posts,
     projects: content.projects,
-    topics: content.topics,
-    graphData: buildGraphData(content.posts, content.projects, content.topics)
+    categories: content.categories,
+    graphData: buildGraphData(content.posts, content.projects, content.categories)
   };
 }
 
@@ -83,7 +79,7 @@ export async function projectDetailLoader({ params }: LoaderFunctionArgs): Promi
 }
 
 export async function graphLoader(): Promise<GraphLoaderData> {
-  const { posts, projects, topics } = await loadPublishedContent();
+  const { posts, projects, categories } = await loadPublishedContent();
 
-  return { graphData: buildGraphData(posts, projects, topics) };
+  return { graphData: buildGraphData(posts, projects, categories) };
 }

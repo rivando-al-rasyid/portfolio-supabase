@@ -9,7 +9,7 @@ import { SEO } from '../seo/SEO';
 import type { HomeLoaderData } from '../../routes/loaders/contentLoaders';
 
 export function HomePage() {
-  const { site, posts, projects, topics, graphData } = useLoaderData() as HomeLoaderData;
+  const { site, posts, projects, categories, graphData } = useLoaderData() as HomeLoaderData;
   const featuredProjects = projects.filter((project) => project.is_featured).slice(0, 4);
   const fallbackProjects = featuredProjects.length > 0 ? featuredProjects : projects.slice(0, 4);
   const visibleProjects = fallbackProjects;
@@ -25,7 +25,7 @@ export function HomePage() {
             <Badge className="mb-5">{site?.hero_badge ?? 'React + Tailwind 4 + Supabase'}</Badge>
             <h1 className="text-4xl font-bold tracking-tight md:text-6xl">{site?.hero_title ?? 'Portfolio that works like a knowledge graph.'}</h1>
             <p className="mt-5 max-w-2xl text-lg text-muted-foreground">
-              {site?.hero_description ?? 'Publish posts, projects, and topics from a protected CMS dashboard. Then connect them through automatic relations and share-ready SEO metadata.'}
+              {site?.hero_description ?? 'Publish posts, projects, and categories from a protected CMS dashboard. Then connect them through automatic relations and share-ready SEO metadata.'}
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild size="lg">
@@ -118,13 +118,13 @@ export function HomePage() {
       <section className="mx-auto max-w-6xl px-4 py-14">
         <div className="mb-8 grid gap-5 md:grid-cols-[0.75fr_1fr]">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.25em] text-primary">Topics</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.25em] text-primary">Categories</p>
             <h2 className="mt-2 text-3xl font-bold">Skill map</h2>
           </div>
           <div className="flex flex-wrap gap-2 md:justify-end">
-            {topics.map((topic) => (
-              <Badge key={topic.id} variant="outline" className="px-3 py-1 text-sm">
-                {topic.name}
+            {categories.map((category) => (
+              <Badge key={category.id} variant="outline" className="px-3 py-1 text-sm">
+                {category.name}
               </Badge>
             ))}
           </div>

@@ -1,15 +1,15 @@
 export type PublishStatus = 'draft' | 'published';
 export type ContentSource = 'manual' | 'github_readme' | 'markdown_url';
-export type EntityType = 'blog' | 'project' | 'topic';
+export type EntityType = 'blog' | 'project' | 'category';
 export type SharePlatform = 'linkedin' | 'x' | 'facebook' | 'whatsapp' | 'telegram' | 'email';
+export type ShareStatus = 'pending' | 'ready' | 'sent' | 'failed';
 
-export interface Topic {
+export interface Category {
   id: string;
   name: string;
   slug: string;
-  description: string | null;
-  aliases: string[] | null;
   created_at: string;
+  updated_at: string;
 }
 
 export interface BlogPost {
@@ -30,7 +30,7 @@ export interface BlogPost {
   published_at: string | null;
   created_at: string;
   updated_at: string;
-  topics?: Topic[];
+  categories?: Category[];
 }
 
 export interface Project {
@@ -51,7 +51,7 @@ export interface Project {
   meta_description: string | null;
   created_at: string;
   updated_at: string;
-  topics?: Topic[];
+  categories?: Category[];
 }
 
 export interface SiteSettings {
@@ -93,4 +93,33 @@ export interface ShareSettings {
   active_platforms: SharePlatform[];
   default_message_template: string;
   updated_at: string;
+}
+
+export interface SocialApiConnection {
+  id: string;
+  platform: SharePlatform;
+  label: string | null;
+  is_enabled: boolean;
+  api_base_url: string | null;
+  api_code: string | null;
+  api_token: string | null;
+  api_secret: string | null;
+  account_id: string | null;
+  extra_config: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SocialShareQueueItem {
+  id: string;
+  entity_type: Extract<EntityType, 'blog' | 'project'>;
+  entity_id: string;
+  platform: SharePlatform;
+  status: ShareStatus;
+  payload: Record<string, unknown>;
+  scheduled_at: string;
+  sent_at: string | null;
+  error_message: string | null;
+  attempts: number;
+  created_at: string;
 }

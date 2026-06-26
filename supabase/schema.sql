@@ -1,12 +1,18 @@
 create extension if not exists pgcrypto;
 
+-- Fresh CMS schema: topics are replaced by categories.
 do $$ begin
   create type publish_status as enum ('draft', 'published');
 exception when duplicate_object then null;
 end $$;
 
 do $$ begin
-  create type entity_type as enum ('blog', 'project', 'topic');
+  create type entity_type as enum ('blog', 'project', 'category');
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  alter type entity_type add value if not exists 'category';
 exception when duplicate_object then null;
 end $$;
 
@@ -69,21 +75,31 @@ alter table projects add column if not exists source_url text;
 alter table projects add column if not exists is_featured boolean not null default false;
 alter table projects add column if not exists sort_order integer not null default 100;
 
-create table if not exists topics (
+create table if not exists categories (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   slug text not null unique,
-  description text,
-  aliases text[] default '{}',
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
+
+-- One-time migration from the older topics table, if it exists.
+do $$ begin
+  if to_regclass('public.topics') is not null then
+    execute 'insert into public.categories (name, slug, created_at, updated_at)
+      select name, slug, created_at, now() from public.topics
+      on conflict (slug) do update set
+        name = excluded.name,
+        updated_at = now()';
+  end if;
+end $$;
 
 create table if not exists site_settings (
   id text primary key default 'default',
   site_name text not null default 'Portfolio Knowledge Graph',
   hero_badge text not null default 'React + Tailwind 4 + Supabase',
   hero_title text not null default 'Portfolio that works like a knowledge graph.',
-  hero_description text not null default 'Publish posts, projects, and topics from a protected CMS dashboard. Then connect them through automatic relations and share-ready SEO metadata.',
+  hero_description text not null default 'Publish posts, projects, and categories from a protected CMS dashboard. Then connect them through automatic relations and share-ready SEO metadata.',
   primary_cta_label text not null default 'View projects',
   primary_cta_href text not null default '/projects',
   secondary_cta_label text not null default 'Explore graph',
@@ -91,23 +107,65 @@ create table if not exists site_settings (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists blog_post_topics (
+create table if not exists blog_post_categories (
   blog_post_id uuid not null references blog_posts(id) on delete cascade,
-  topic_id uuid not null references topics(id) on delete cascade,
-  primary key (blog_post_id, topic_id)
+  category_id uuid not null references categories(id) on delete cascade,
+  primary key (blog_post_id, category_id)
 );
 
-create table if not exists project_topics (
+create table if not exists project_categories (
   project_id uuid not null references projects(id) on delete cascade,
-  topic_id uuid not null references topics(id) on delete cascade,
-  primary key (project_id, topic_id)
+  category_id uuid not null references categories(id) on delete cascade,
+  primary key (project_id, category_id)
 );
+
+-- One-time relationship migration from blog_post_topics/project_topics.
+do $$ begin
+  if to_regclass('public.blog_post_topics') is not null and to_regclass('public.topics') is not null then
+    execute 'insert into public.blog_post_categories (blog_post_id, category_id)
+      select old.blog_post_id, c.id
+      from public.blog_post_topics old
+      join public.topics t on t.id = old.topic_id
+      join public.categories c on c.slug = t.slug
+      on conflict do nothing';
+  end if;
+
+  if to_regclass('public.project_topics') is not null and to_regclass('public.topics') is not null then
+    execute 'insert into public.project_categories (project_id, category_id)
+      select old.project_id, c.id
+      from public.project_topics old
+      join public.topics t on t.id = old.topic_id
+      join public.categories c on c.slug = t.slug
+      on conflict do nothing';
+  end if;
+end $$;
+
+drop table if exists blog_post_topics cascade;
+drop table if exists project_topics cascade;
+drop table if exists topics cascade;
+
+alter table categories drop column if exists description;
 
 create table if not exists social_share_settings (
   id text primary key default 'default',
   auto_share_on_publish boolean not null default true,
   active_platforms share_platform[] not null default array['linkedin','x','facebook','whatsapp','telegram','email']::share_platform[],
   default_message_template text not null default 'New {{type}}: {{title}} {{url}}',
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists social_api_connections (
+  id uuid primary key default gen_random_uuid(),
+  platform share_platform not null unique,
+  label text,
+  is_enabled boolean not null default true,
+  api_base_url text,
+  api_code text,
+  api_token text,
+  api_secret text,
+  account_id text,
+  extra_config jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
@@ -153,17 +211,20 @@ create index if not exists idx_blog_status on blog_posts(status, published_at de
 create index if not exists idx_blog_featured on blog_posts(is_featured desc, sort_order asc);
 create index if not exists idx_project_status on projects(status, updated_at desc);
 create index if not exists idx_project_featured on projects(is_featured desc, sort_order asc);
-create index if not exists idx_topic_slug on topics(slug);
+create index if not exists idx_category_slug on categories(slug);
+create index if not exists idx_category_name on categories using gin (to_tsvector('simple', name));
 create index if not exists idx_share_queue_status on social_share_queue(status, scheduled_at);
 create index if not exists idx_share_events_entity on share_events(entity_type, entity_id);
+create index if not exists idx_social_api_platform on social_api_connections(platform);
 
 alter table blog_posts enable row level security;
 alter table projects enable row level security;
-alter table topics enable row level security;
+alter table categories enable row level security;
 alter table site_settings enable row level security;
-alter table blog_post_topics enable row level security;
-alter table project_topics enable row level security;
+alter table blog_post_categories enable row level security;
+alter table project_categories enable row level security;
 alter table social_share_settings enable row level security;
+alter table social_api_connections enable row level security;
 alter table social_share_queue enable row level security;
 alter table share_events enable row level security;
 
@@ -184,11 +245,11 @@ drop policy if exists "Authenticated can manage projects" on projects;
 create policy "Authenticated can manage projects" on projects
   for all to authenticated using (true) with check (true);
 
-drop policy if exists "Public can read topics" on topics;
-create policy "Public can read topics" on topics for select using (true);
+drop policy if exists "Public can read categories" on categories;
+create policy "Public can read categories" on categories for select using (true);
 
-drop policy if exists "Authenticated can manage topics" on topics;
-create policy "Authenticated can manage topics" on topics
+drop policy if exists "Authenticated can manage categories" on categories;
+create policy "Authenticated can manage categories" on categories
   for all to authenticated using (true) with check (true);
 
 drop policy if exists "Public can read site settings" on site_settings;
@@ -198,21 +259,21 @@ drop policy if exists "Authenticated can manage site settings" on site_settings;
 create policy "Authenticated can manage site settings" on site_settings
   for all to authenticated using (true) with check (true);
 
-drop policy if exists "Public can read blog topic links" on blog_post_topics;
-create policy "Public can read blog topic links" on blog_post_topics for select using (true);
+drop policy if exists "Public can read blog category links" on blog_post_categories;
+create policy "Public can read blog category links" on blog_post_categories for select using (true);
 
-drop policy if exists "Authenticated can manage blog topic links" on blog_post_topics;
-create policy "Authenticated can manage blog topic links" on blog_post_topics
+drop policy if exists "Authenticated can manage blog category links" on blog_post_categories;
+create policy "Authenticated can manage blog category links" on blog_post_categories
   for all to authenticated using (true) with check (true);
 
-drop policy if exists "Public can read project topic links" on project_topics;
-create policy "Public can read project topic links" on project_topics for select using (true);
+drop policy if exists "Public can read project category links" on project_categories;
+create policy "Public can read project category links" on project_categories for select using (true);
 
-drop policy if exists "Authenticated can manage project topic links" on project_topics;
-create policy "Authenticated can manage project topic links" on project_topics
+drop policy if exists "Authenticated can manage project category links" on project_categories;
+create policy "Authenticated can manage project category links" on project_categories
   for all to authenticated using (true) with check (true);
 
--- Share policies
+-- Share settings are public-readable because the frontend only needs toggles/templates; API secrets are never public-readable.
 drop policy if exists "Public can read share settings" on social_share_settings;
 create policy "Public can read share settings" on social_share_settings for select using (true);
 
@@ -220,17 +281,27 @@ drop policy if exists "Authenticated can manage share settings" on social_share_
 create policy "Authenticated can manage share settings" on social_share_settings
   for all to authenticated using (true) with check (true);
 
+drop policy if exists "Authenticated can manage social API connections" on social_api_connections;
+create policy "Authenticated can manage social API connections" on social_api_connections
+  for all to authenticated using (true) with check (true);
+
 drop policy if exists "Authenticated can manage share queue" on social_share_queue;
 create policy "Authenticated can manage share queue" on social_share_queue
   for all to authenticated using (true) with check (true);
 
+drop policy if exists "Authenticated can read share queue" on social_share_queue;
+create policy "Authenticated can read share queue" on social_share_queue
+  for select to authenticated using (true);
+
 drop policy if exists "Public can insert share events" on share_events;
-create policy "Public can insert share events" on share_events for insert with check (true);
+create policy "Public can insert share events" on share_events
+  for insert with check (true);
 
 drop policy if exists "Authenticated can read share events" on share_events;
-create policy "Authenticated can read share events" on share_events for select to authenticated using (true);
+create policy "Authenticated can read share events" on share_events
+  for select to authenticated using (true);
 
--- Storage policies for CMS media.
+-- Storage policies
 drop policy if exists "Public can read portfolio media" on storage.objects;
 create policy "Public can read portfolio media" on storage.objects
   for select using (bucket_id = 'portfolio-media');

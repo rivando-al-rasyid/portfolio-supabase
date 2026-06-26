@@ -8,7 +8,7 @@ import type { GraphData, GraphNode } from '../../types/content';
 function nodePath(node: GraphNode) {
   if (node.type === 'blog') return `/blog/${node.slug}`;
   if (node.type === 'project') return `/projects/${node.slug}`;
-  return `/graph?topic=${node.slug}`;
+  return `/graph?category=${node.slug}`;
 }
 
 function nodeColor(type: GraphNode['type']) {
@@ -25,7 +25,7 @@ function layoutGraph(data: GraphData) {
   const radius = Math.min(width, height) * 0.35;
   const nodes = data.nodes.map((node, index) => {
     const angle = (Math.PI * 2 * index) / Math.max(data.nodes.length, 1) - Math.PI / 2;
-    const typeOffset = node.type === 'topic' ? -45 : node.type === 'project' ? 35 : 0;
+    const typeOffset = node.type === 'category' ? -45 : node.type === 'project' ? 35 : 0;
     return {
       ...node,
       x: cx + Math.cos(angle) * (radius + typeOffset),
@@ -48,7 +48,7 @@ export function KnowledgeGraph({ data, compact = false }: { data: GraphData; com
             <CardTitle className="flex items-center gap-2 text-xl">
               <Network className="h-5 w-5 text-primary" /> Knowledge graph
             </CardTitle>
-            <CardDescription>Auto-linked by topics and keyword overlap. Click a node to inspect it.</CardDescription>
+            <CardDescription>Auto-linked by categories and keyword overlap. Click a node to inspect it.</CardDescription>
           </div>
           <Badge variant="outline">{graph.nodes.length} nodes</Badge>
         </div>
@@ -76,7 +76,7 @@ export function KnowledgeGraph({ data, compact = false }: { data: GraphData; com
             })}
             {graph.nodes.map((node) => (
               <g key={node.id} className="cursor-pointer" onClick={() => setSelected(node)}>
-                <circle cx={node.x} cy={node.y} r={node.type === 'topic' ? 15 : 20} className={nodeColor(node.type)} opacity="0.92" />
+                <circle cx={node.x} cy={node.y} r={node.type === 'category' ? 15 : 20} className={nodeColor(node.type)} opacity="0.92" />
                 <text x={node.x} y={node.y + 33} textAnchor="middle" className="graph-label fill-foreground text-[13px] font-semibold">
                   {node.label.length > 18 ? `${node.label.slice(0, 18)}…` : node.label}
                 </text>
@@ -90,7 +90,7 @@ export function KnowledgeGraph({ data, compact = false }: { data: GraphData; com
               <Badge>{selected.type}</Badge>
               <h3 className="mt-3 text-lg font-semibold">{selected.label}</h3>
               <p className="mt-2 text-sm text-muted-foreground">{selected.description || 'No description yet.'}</p>
-              {selected.type !== 'topic' ? (
+              {selected.type !== 'category' ? (
                 <Link to={nodePath(selected)} className="mt-4 inline-flex text-sm font-medium text-primary hover:underline">
                   Open detail
                 </Link>
@@ -100,7 +100,7 @@ export function KnowledgeGraph({ data, compact = false }: { data: GraphData; com
             <div>
               <h3 className="font-semibold">Explore connections</h3>
               <p className="mt-2 text-sm text-muted-foreground">
-                Topics connect posts and projects. Keyword overlap creates extra edges, making the portfolio easier to explore.
+                Categories connect posts and projects. Keyword overlap creates extra edges, making the portfolio easier to explore.
               </p>
             </div>
           )}
