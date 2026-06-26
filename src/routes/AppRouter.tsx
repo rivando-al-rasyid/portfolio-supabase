@@ -1,37 +1,43 @@
-import { createBrowserRouter, RouterProvider } from "react-router";
-import { Layout } from "../components/Layout";
-import { HomePage } from "../features/home/HomePage";
-import { BlogListPage } from "../features/blog/BlogListPage";
-import { BlogDetailPage } from "../features/blog/BlogDetailPage";
-import { ProjectListPage } from "../features/projects/ProjectListPage";
-import { ProjectDetailPage } from "../features/projects/ProjectDetailPage";
-import { GraphPage } from "../features/graph/GraphPage";
-import { AdminPage } from "../features/admin/AdminPage";
-import { LoginPage } from "../features/auth/LoginPage";
-import { RequireAuth } from "../features/auth/RequireAuth";
+import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { Layout } from '../components/Layout';
+import { AdminPage } from '../features/admin/AdminPage';
+import { LoginPage } from '../features/auth/LoginPage';
+import { BlogDetailPage } from '../features/blog/BlogDetailPage';
+import { BlogListPage } from '../features/blog/BlogListPage';
+import { GraphPage } from '../features/graph/GraphPage';
+import { HomePage } from '../features/home/HomePage';
+import { ProjectDetailPage } from '../features/projects/ProjectDetailPage';
+import { ProjectListPage } from '../features/projects/ProjectListPage';
+import { loginAction } from './actions/authActions';
+import { adminLoader, loginLoader } from './loaders/authLoaders';
+import {
+  blogDetailLoader,
+  blogListLoader,
+  graphLoader,
+  homeLoader,
+  projectDetailLoader,
+  projectListLoader
+} from './loaders/contentLoaders';
+import { NotFoundPage } from './NotFoundPage';
+import { RouteError } from './RouteError';
 
 const router = createBrowserRouter([
   {
-    path: "/",
+    path: '/',
     element: <Layout />,
+    errorElement: <RouteError />,
     children: [
-      { index: true, element: <HomePage /> },
-      { path: "blog", element: <BlogListPage /> },
-      { path: "blog/:slug", element: <BlogDetailPage /> },
-      { path: "projects", element: <ProjectListPage /> },
-      { path: "projects/:slug", element: <ProjectDetailPage /> },
-      { path: "graph", element: <GraphPage /> },
-      { path: "login", element: <LoginPage /> },
-      {
-        path: "admin",
-        element: (
-          <RequireAuth>
-            <AdminPage />
-          </RequireAuth>
-        ),
-      },
-    ],
-  },
+      { index: true, loader: homeLoader, element: <HomePage /> },
+      { path: 'blog', loader: blogListLoader, element: <BlogListPage /> },
+      { path: 'blog/:slug', loader: blogDetailLoader, element: <BlogDetailPage /> },
+      { path: 'projects', loader: projectListLoader, element: <ProjectListPage /> },
+      { path: 'projects/:slug', loader: projectDetailLoader, element: <ProjectDetailPage /> },
+      { path: 'graph', loader: graphLoader, element: <GraphPage /> },
+      { path: 'login', loader: loginLoader, action: loginAction, element: <LoginPage /> },
+      { path: 'admin', loader: adminLoader, element: <AdminPage /> },
+      { path: '*', element: <NotFoundPage /> }
+    ]
+  }
 ]);
 
 export function AppRouter() {

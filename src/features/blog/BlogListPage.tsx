@@ -1,10 +1,11 @@
+import { useLoaderData } from 'react-router-dom';
 import { ContentCard } from '../../components/ContentCard';
 import { EmptyState } from '../../components/EmptyState';
-import { usePublishedBlogPosts } from '../../hooks/usePortfolioData';
+import type { BlogListLoaderData } from '../../routes/loaders/contentLoaders';
 import { SEO } from '../seo/SEO';
 
 export function BlogListPage() {
-  const { data: posts = [], isLoading } = usePublishedBlogPosts();
+  const { posts } = useLoaderData() as BlogListLoaderData;
 
   return (
     <>
@@ -16,9 +17,7 @@ export function BlogListPage() {
           <p className="mt-4 text-muted-foreground">Write public articles from the admin dashboard and connect them to topics automatically.</p>
         </div>
 
-        {isLoading ? <div className="grid gap-5 md:grid-cols-2">{[1, 2, 3, 4].map((i) => <div key={i} className="h-56 animate-pulse rounded-xl bg-muted" />)}</div> : null}
-
-        {!isLoading && posts.length === 0 ? (
+        {posts.length === 0 ? (
           <EmptyState title="No posts yet" description="Publish a blog post from /admin after creating your Supabase user and running the schema." />
         ) : null}
 

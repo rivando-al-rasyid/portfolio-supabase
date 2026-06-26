@@ -1,21 +1,15 @@
-import { useQuery } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLoaderData } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
-import { getBlogPostBySlug } from '../../lib/contentService';
 import { formatDate, generateSeoDescription, generateSeoTitle, getCanonicalUrl } from '../../lib/utils';
 import { renderMarkdown } from '../../lib/markdown';
 import { ShareButton } from '../share/ShareButton';
 import { SEO } from '../seo/SEO';
+import type { BlogDetailLoaderData } from '../../routes/loaders/contentLoaders';
 
 export function BlogDetailPage() {
-  const { slug = '' } = useParams();
-  const { data: post, isLoading } = useQuery({ queryKey: ['blog-post', slug], queryFn: () => getBlogPostBySlug(slug), enabled: Boolean(slug) });
-
-  if (isLoading) {
-    return <div className="mx-auto max-w-3xl px-4 py-12"><div className="h-96 animate-pulse rounded-xl bg-muted" /></div>;
-  }
+  const { post } = useLoaderData() as BlogDetailLoaderData;
 
   if (!post) {
     return (

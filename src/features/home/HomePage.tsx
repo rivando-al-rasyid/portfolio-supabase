@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useLoaderData } from 'react-router-dom';
 import { ArrowRight, Network } from 'lucide-react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
@@ -6,13 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { ContentCard } from '../../components/ContentCard';
 import { KnowledgeGraph } from '../graph/KnowledgeGraph';
 import { SEO } from '../seo/SEO';
-import { usePublishedBlogPosts, usePublishedProjects, useSiteSettings, useTopics } from '../../hooks/usePortfolioData';
+import type { HomeLoaderData } from '../../routes/loaders/contentLoaders';
 
 export function HomePage() {
-  const { data: site } = useSiteSettings();
-  const { data: posts = [] } = usePublishedBlogPosts();
-  const { data: projects = [] } = usePublishedProjects();
-  const { data: topics = [] } = useTopics();
+  const { site, posts, projects, topics, graphData } = useLoaderData() as HomeLoaderData;
   const featuredProjects = projects.filter((project) => project.is_featured).slice(0, 4);
   const fallbackProjects = featuredProjects.length > 0 ? featuredProjects : projects.slice(0, 4);
   const visibleProjects = fallbackProjects;
@@ -132,7 +129,7 @@ export function HomePage() {
             ))}
           </div>
         </div>
-        <KnowledgeGraph compact />
+        <KnowledgeGraph compact data={graphData} />
       </section>
 
     </>

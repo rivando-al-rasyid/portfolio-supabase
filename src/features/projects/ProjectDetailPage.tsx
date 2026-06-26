@@ -1,21 +1,15 @@
-import { useQuery } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLoaderData } from 'react-router-dom';
 import { ArrowLeft, ExternalLink, GitBranch } from 'lucide-react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
-import { getProjectBySlug } from '../../lib/contentService';
 import { generateSeoDescription, generateSeoTitle, getCanonicalUrl } from '../../lib/utils';
 import { renderMarkdown } from '../../lib/markdown';
 import { ShareButton } from '../share/ShareButton';
 import { SEO } from '../seo/SEO';
+import type { ProjectDetailLoaderData } from '../../routes/loaders/contentLoaders';
 
 export function ProjectDetailPage() {
-  const { slug = '' } = useParams();
-  const { data: project, isLoading } = useQuery({ queryKey: ['project', slug], queryFn: () => getProjectBySlug(slug), enabled: Boolean(slug) });
-
-  if (isLoading) {
-    return <div className="mx-auto max-w-3xl px-4 py-12"><div className="h-96 animate-pulse rounded-xl bg-muted" /></div>;
-  }
+  const { project } = useLoaderData() as ProjectDetailLoaderData;
 
   if (!project) {
     return (

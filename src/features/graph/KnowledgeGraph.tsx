@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { Network } from 'lucide-react';
 import { Badge } from '../../components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
-import { useGraphData } from '../../hooks/usePortfolioData';
 import type { GraphData, GraphNode } from '../../types/content';
 
 function nodePath(node: GraphNode) {
@@ -37,14 +36,9 @@ function layoutGraph(data: GraphData) {
   return { width, height, nodes, edges: data.edges, positions };
 }
 
-export function KnowledgeGraph({ compact = false }: { compact?: boolean }) {
-  const { data, isLoading } = useGraphData();
+export function KnowledgeGraph({ data, compact = false }: { data: GraphData; compact?: boolean }) {
   const [selected, setSelected] = useState<GraphNode | null>(null);
-  const graph = useMemo(() => layoutGraph(data ?? { nodes: [], edges: [] }), [data]);
-
-  if (isLoading) {
-    return <div className="h-[420px] animate-pulse rounded-xl border bg-muted" />;
-  }
+  const graph = useMemo(() => layoutGraph(data), [data]);
 
   return (
     <Card className="overflow-hidden">

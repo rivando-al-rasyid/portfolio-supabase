@@ -1,7 +1,11 @@
+import { useLoaderData } from 'react-router-dom';
 import { KnowledgeGraph } from './KnowledgeGraph';
 import { SEO } from '../seo/SEO';
+import type { GraphLoaderData } from '../../routes/loaders/contentLoaders';
 
 export function GraphPage() {
+  const { graphData } = useLoaderData() as GraphLoaderData;
+
   return (
     <>
       <SEO title="Knowledge Graph" description="Interactive map of posts, projects, and topics." path="/graph" />
@@ -13,7 +17,7 @@ export function GraphPage() {
             This version uses a lightweight SVG graph, so it does not depend on a heavy graph canvas library. That makes the fresh remake easier to debug and deploy.
           </p>
         </div>
-        <KnowledgeGraph />
+        <KnowledgeGraph data={graphData} />
       </section>
     </>
   );

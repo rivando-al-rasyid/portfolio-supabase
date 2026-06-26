@@ -1,10 +1,11 @@
+import { useLoaderData } from 'react-router-dom';
 import { ContentCard } from '../../components/ContentCard';
 import { EmptyState } from '../../components/EmptyState';
-import { usePublishedProjects } from '../../hooks/usePortfolioData';
+import type { ProjectListLoaderData } from '../../routes/loaders/contentLoaders';
 import { SEO } from '../seo/SEO';
 
 export function ProjectListPage() {
-  const { data: projects = [], isLoading } = usePublishedProjects();
+  const { projects } = useLoaderData() as ProjectListLoaderData;
 
   return (
     <>
@@ -16,9 +17,7 @@ export function ProjectListPage() {
           <p className="mt-4 text-muted-foreground">Showcase projects, link repositories, and connect each work item to topics.</p>
         </div>
 
-        {isLoading ? <div className="grid gap-5 md:grid-cols-2">{[1, 2, 3, 4].map((i) => <div key={i} className="h-56 animate-pulse rounded-xl bg-muted" />)}</div> : null}
-
-        {!isLoading && projects.length === 0 ? (
+        {projects.length === 0 ? (
           <EmptyState title="No projects yet" description="Create and publish projects from the protected admin dashboard." />
         ) : null}
 

@@ -1,4 +1,5 @@
 import { ChangeEvent, FormEvent, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ImageIcon, Loader2, LogOut, Pencil, Plus, RefreshCw, Save, Settings, Trash2, Upload } from 'lucide-react';
 import { CmsRichTextEditor } from '../../components/CmsRichTextEditor';
@@ -192,6 +193,7 @@ function ContentList({
 
 export function AdminPage() {
   const { user, signOut } = useAuth();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>('content');
   const [editor, setEditor] = useState<EditorState>(emptyEditor);
@@ -383,6 +385,7 @@ export function AdminPage() {
 
   async function handleLogout() {
     await signOut();
+    navigate('/login', { replace: true });
   }
 
   function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
