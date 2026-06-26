@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ImageIcon, Loader2, LogOut, Pencil, Plus, RefreshCw, Rocket, Save, Settings, Trash2, Upload, X } from 'lucide-react';
+import { ImageIcon, Loader2, LogOut, Pencil, Plus, RefreshCw, Save, Settings, Trash2, Upload, X } from 'lucide-react';
 import { CmsRichTextEditor } from '../../components/CmsRichTextEditor';
 import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert';
 import { Badge } from '../../components/ui/badge';
@@ -9,7 +9,6 @@ import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
 import { Select } from '../../components/ui/select';
-import { Separator } from '../../components/ui/separator';
 import { Textarea } from '../../components/ui/textarea';
 import {
   createBlogPost,
@@ -27,7 +26,6 @@ import {
   getSocialApiConnections,
   replaceBlogPostCategories,
   replaceProjectCategories,
-  runSocialShareProcessor,
   updateBlogPost,
   updateProject,
   updateShareSettings,
@@ -72,7 +70,6 @@ interface ApiConnectionEditorState {
   apiToken: string;
   apiSecret: string;
   accountId: string;
-  extraConfig: string;
 }
 
 const emptyEditor: EditorState = {
@@ -95,6 +92,28 @@ const emptyEditor: EditorState = {
 
 const platforms: SharePlatform[] = ['linkedin', 'x', 'facebook', 'whatsapp', 'telegram', 'email'];
 
+const platformLabels: Record<SharePlatform, string> = {
+  linkedin: 'LinkedIn',
+  x: 'X / Twitter',
+  facebook: 'Facebook',
+  whatsapp: 'WhatsApp',
+  telegram: 'Telegram',
+  email: 'Email'
+};
+
+const platformDescriptions: Record<SharePlatform, string> = {
+  linkedin: 'Use a posting webhook or approved LinkedIn API service.',
+  x: 'Use a posting webhook or approved X API service.',
+  facebook: 'Use a Page publishing webhook or approved Meta API service.',
+  whatsapp: 'Use WhatsApp Business, n8n, Make, Zapier, or your own webhook.',
+  telegram: 'Direct posting uses bot token and chat ID. No webhook endpoint is required.',
+  email: 'Use an email provider webhook such as Resend, SendGrid, or your own endpoint.'
+};
+
+function getPlatformLabel(platform: SharePlatform) {
+  return platformLabels[platform] ?? platform;
+}
+
 const emptyApiEditor: ApiConnectionEditorState = {
   platform: 'linkedin',
   label: '',
@@ -103,8 +122,7 @@ const emptyApiEditor: ApiConnectionEditorState = {
   apiCode: '',
   apiToken: '',
   apiSecret: '',
-  accountId: '',
-  extraConfig: '{}'
+  accountId: ''
 };
 
 function editorFromItem(type: EditableType, item: BlogPost | Project): EditorState {
@@ -158,8 +176,7 @@ function apiEditorFromConnection(connection: SocialApiConnection): ApiConnection
     apiCode: connection.api_code ?? '',
     apiToken: connection.api_token ?? '',
     apiSecret: connection.api_secret ?? '',
-    accountId: connection.account_id ?? '',
-    extraConfig: JSON.stringify(connection.extra_config ?? {}, null, 2)
+    accountId: connection.account_id ?? ''
   };
 }
 
@@ -451,22 +468,16 @@ export function AdminPage() {
 
   const apiConnectionMutation = useMutation({
     mutationFn: async (state: ApiConnectionEditorState) => {
-      let extraConfig: Record<string, unknown> = {};
-      try {
-        extraConfig = JSON.parse(state.extraConfig || '{}') as Record<string, unknown>;
-      } catch {
-        throw new Error('Extra config must be valid JSON. Use {} if you do not need it.');
-      }
       return upsertSocialApiConnection({
         platform: state.platform,
         label: state.label || null,
         is_enabled: state.isEnabled,
-        api_base_url: state.apiBaseUrl || null,
+        api_base_url: state.platform === 'telegram' ? null : state.apiBaseUrl || null,
         api_code: state.apiCode || null,
         api_token: state.apiToken || null,
         api_secret: state.apiSecret || null,
         account_id: state.accountId || null,
-        extra_config: extraConfig
+        extra_config: {}
       });
     },
     onSuccess: async () => {
@@ -481,18 +492,6 @@ export function AdminPage() {
     }
   });
 
-  const processorMutation = useMutation({
-    mutationFn: runSocialShareProcessor,
-    onSuccess: async (result) => {
-      setMessage(result.message ?? `Share processor finished. Processed: ${result.processed ?? 0}, failed: ${result.failed ?? 0}.`);
-      setError('');
-      await queryClient.invalidateQueries({ queryKey: ['admin', 'share-queue'] });
-    },
-    onError: (err) => {
-      setError(err instanceof Error ? err.message : 'Cannot run process-social-share Edge Function. Deploy the function first.');
-      setMessage('');
-    }
-  });
 
   const categoryDeleteMutation = useMutation({
     mutationFn: deleteCategory,
@@ -565,6 +564,15 @@ export function AdminPage() {
   const totalPublished = useMemo(
     () => posts.filter((post) => post.status === 'published').length + projects.filter((project) => project.status === 'published').length,
     [posts, projects]
+  );
+
+  const shareQueueStats = useMemo(
+    () => ({
+      ready: shareQueue.filter((item) => item.status === 'ready').length,
+      sent: shareQueue.filter((item) => item.status === 'sent').length,
+      failed: shareQueue.filter((item) => item.status === 'failed').length
+    }),
+    [shareQueue]
   );
 
   const seoPreview = useMemo(
@@ -973,112 +981,196 @@ export function AdminPage() {
         {tab === 'site' && siteSettings ? <SiteSettingsForm settings={siteSettings} onSubmit={handleSiteSubmit} isPending={siteMutation.isPending} /> : null}
 
         {tab === 'settings' && shareSettings ? (
-          <div className="grid gap-6 lg:grid-cols-[1fr_0.85fr]">
-            <Card>
-              <CardHeader>
-                <CardTitle>Auto-share settings</CardTitle>
-                <CardDescription>Queue share jobs when blog/project content becomes published.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <Alert>
-                  <AlertTitle>Important security note</AlertTitle>
-                  <AlertDescription>
-                    The API code/token fields are stored in the database because you asked for database-based API config. For a public production app, process posting only inside a Supabase Edge Function with service-role access. Do not call social media APIs with private tokens from the Vite frontend.
-                  </AlertDescription>
-                </Alert>
-                <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
-                  <div>
-                    <h3 className="font-medium">Auto queue share jobs on publish</h3>
-                    <p className="text-sm text-muted-foreground">When enabled, newly published blog/project items create rows in social_share_queue.</p>
+          <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Auto-share workflow</CardTitle>
+                  <CardDescription>
+                    Auto-share does not post from the browser. Published blog/project items are added to a queue, then a Supabase Edge Function sends them using your saved platform connection.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-lg border bg-muted/20 p-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Automation</p>
+                      <p className="mt-1 text-lg font-semibold">{shareSettings.auto_share_on_publish ? 'Enabled' : 'Disabled'}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Creates queue rows when new content becomes published.</p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/20 p-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Platforms</p>
+                      <p className="mt-1 text-lg font-semibold">{shareSettings.active_platforms.length}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Selected destinations for new queue jobs.</p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/20 p-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Queue</p>
+                      <p className="mt-1 text-lg font-semibold">{shareQueueStats.ready} ready</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{shareQueueStats.sent} sent, {shareQueueStats.failed} failed.</p>
+                    </div>
                   </div>
-                  <Button
-                    type="button"
-                    variant={shareSettings.auto_share_on_publish ? 'default' : 'outline'}
-                    onClick={() =>
-                      settingsMutation.mutate({
-                        auto_share_on_publish: !shareSettings.auto_share_on_publish,
-                        active_platforms: shareSettings.active_platforms,
-                        default_message_template: shareSettings.default_message_template
-                      })
-                    }
-                  >
-                    {shareSettings.auto_share_on_publish ? 'Enabled' : 'Disabled'}
-                  </Button>
-                </div>
 
-                <div>
-                  <h3 className="mb-3 font-medium">Active platforms</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {platforms.map((platform) => (
-                      <Button key={platform} type="button" variant={shareSettings.active_platforms.includes(platform) ? 'default' : 'outline'} onClick={() => togglePlatform(platform)}>
-                        {platform === 'x' ? 'X / Twitter' : platform}
+                  <div className="rounded-lg border p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h3 className="font-medium">Create share jobs automatically</h3>
+                        <p className="text-sm text-muted-foreground">
+                          Turn this on when you want the CMS to prepare social posts every time a draft is published. Turn it off when you only want to publish content without sharing it.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant={shareSettings.auto_share_on_publish ? 'default' : 'outline'}
+                        onClick={() =>
+                          settingsMutation.mutate({
+                            auto_share_on_publish: !shareSettings.auto_share_on_publish,
+                            active_platforms: shareSettings.active_platforms,
+                            default_message_template: shareSettings.default_message_template
+                          })
+                        }
+                      >
+                        {shareSettings.auto_share_on_publish ? 'Auto-share enabled' : 'Auto-share disabled'}
                       </Button>
-                    ))}
+                    </div>
                   </div>
-                </div>
 
-                <Separator />
+                  <div className="space-y-3 rounded-lg border p-4">
+                    <div>
+                      <h3 className="font-medium">Destination platforms</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Choose where new blog/project posts are queued. A platform must also have an enabled API connection before the Edge Function can send it.
+                      </p>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {platforms.map((platform) => {
+                        const isActive = shareSettings.active_platforms.includes(platform);
+                        return (
+                          <button
+                            key={platform}
+                            type="button"
+                            onClick={() => togglePlatform(platform)}
+                            className={`rounded-lg border p-3 text-left transition hover:bg-muted/60 ${isActive ? 'border-primary bg-primary/10' : 'bg-background'}`}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="font-medium">{getPlatformLabel(platform)}</span>
+                              <Badge variant={isActive ? 'default' : 'outline'}>{isActive ? 'selected' : 'off'}</Badge>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">{platformDescriptions[platform]}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-                <form
-                  className="space-y-3"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const formData = new FormData(event.currentTarget);
-                    settingsMutation.mutate({
-                      auto_share_on_publish: shareSettings.auto_share_on_publish,
-                      active_platforms: shareSettings.active_platforms,
-                      default_message_template: String(formData.get('template') || '')
-                    });
-                  }}
-                >
-                  <label className="text-sm font-medium">Default message template</label>
-                  <Textarea name="template" defaultValue={shareSettings.default_message_template} />
-                  <p className="text-xs text-muted-foreground">Available variables: {'{{title}}'}, {'{{description}}'}, {'{{url}}'}, {'{{type}}'}, {'{{categories}}'}</p>
-                  <Button type="submit" disabled={settingsMutation.isPending}>Save settings</Button>
-                </form>
+                  <form
+                    className="space-y-3 rounded-lg border p-4"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const formData = new FormData(event.currentTarget);
+                      settingsMutation.mutate({
+                        auto_share_on_publish: shareSettings.auto_share_on_publish,
+                        active_platforms: shareSettings.active_platforms,
+                        default_message_template: String(formData.get('template') || '')
+                      });
+                    }}
+                  >
+                    <div>
+                      <label className="text-sm font-medium">Share message template</label>
+                      <p className="text-sm text-muted-foreground">
+                        This text is rendered by the Edge Function before posting. Keep it simple so the same template works across multiple platforms.
+                      </p>
+                    </div>
+                    <Textarea name="template" defaultValue={shareSettings.default_message_template} className="min-h-28" />
+                    <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
+                      Variables: {'{{title}}'}, {'{{description}}'}, {'{{url}}'}, {'{{type}}'}, {'{{categories}}'}.
+                      Example: New {'{{type}}'}: {'{{title}}'} {'{{url}}'}
+                    </div>
+                    <Button type="submit" disabled={settingsMutation.isPending}>
+                      <Save className="h-4 w-4" /> {settingsMutation.isPending ? 'Saving...' : 'Save auto-share settings'}
+                    </Button>
+                  </form>
 
-                <Button type="button" variant="outline" disabled={processorMutation.isPending} onClick={() => processorMutation.mutate()}>
-                  {processorMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
-                  Run share processor
-                </Button>
-              </CardContent>
-            </Card>
+                  <Alert>
+                    <AlertTitle>How sending works</AlertTitle>
+                    <AlertDescription>
+                      Deploy <code>process-social-share</code> and call it from a scheduled job or server-side webhook. The dashboard no longer includes a manual “run processor” button because production posting should happen outside the public admin page.
+                    </AlertDescription>
+                  </Alert>
+                </CardContent>
+              </Card>
+            </div>
 
             <div className="space-y-6">
               <Card>
                 <CardHeader>
-                  <CardTitle>Social API connection</CardTitle>
-                  <CardDescription>Save API code/token per platform. Existing platform values are reused through database upsert.</CardDescription>
+                  <CardTitle>Platform connection</CardTitle>
+                  <CardDescription>
+                    Save one reusable connection per platform. Existing platform rows are updated, so you do not create duplicate configs.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <form
-                    className="space-y-3"
+                    className="space-y-4"
                     onSubmit={(event) => {
                       event.preventDefault();
                       apiConnectionMutation.mutate(apiEditor);
                     }}
                   >
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Platform</label>
                         <Select value={apiEditor.platform} onChange={(event) => setApiEditor({ ...apiEditor, platform: event.target.value as SharePlatform })}>
-                          {platforms.map((platform) => <option key={platform} value={platform}>{platform === 'x' ? 'X / Twitter' : platform}</option>)}
+                          {platforms.map((platform) => <option key={platform} value={platform}>{getPlatformLabel(platform)}</option>)}
                         </Select>
                       </div>
-                      <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                      <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm sm:self-end">
                         <input type="checkbox" checked={apiEditor.isEnabled} onChange={(event) => setApiEditor({ ...apiEditor, isEnabled: event.target.checked })} className="h-4 w-4 accent-primary" />
                         Enabled
                       </label>
                     </div>
-                    <Input value={apiEditor.label} onChange={(event) => setApiEditor({ ...apiEditor, label: event.target.value })} placeholder="Label, e.g. personal LinkedIn" />
-                    <Input value={apiEditor.apiBaseUrl} onChange={(event) => setApiEditor({ ...apiEditor, apiBaseUrl: event.target.value })} placeholder="API base URL / endpoint" />
-                    <Input value={apiEditor.accountId} onChange={(event) => setApiEditor({ ...apiEditor, accountId: event.target.value })} placeholder="Account ID / page ID / author URN" />
-                    <Input value={apiEditor.apiCode} onChange={(event) => setApiEditor({ ...apiEditor, apiCode: event.target.value })} placeholder="API code / app code" />
-                    <Input type="password" value={apiEditor.apiToken} onChange={(event) => setApiEditor({ ...apiEditor, apiToken: event.target.value })} placeholder="Access token" />
-                    <Input type="password" value={apiEditor.apiSecret} onChange={(event) => setApiEditor({ ...apiEditor, apiSecret: event.target.value })} placeholder="Secret / refresh token / app secret" />
-                    <Textarea value={apiEditor.extraConfig} onChange={(event) => setApiEditor({ ...apiEditor, extraConfig: event.target.value })} className="min-h-24 font-mono text-xs" />
+
+                    <Alert>
+                      <AlertTitle>{getPlatformLabel(apiEditor.platform)} requirement</AlertTitle>
+                      <AlertDescription>{platformDescriptions[apiEditor.platform]}</AlertDescription>
+                    </Alert>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Connection label</label>
+                      <Input value={apiEditor.label} onChange={(event) => setApiEditor({ ...apiEditor, label: event.target.value })} placeholder="Personal LinkedIn, portfolio Telegram, etc." />
+                    </div>
+
+                    {apiEditor.platform !== 'telegram' ? (
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Webhook / posting endpoint</label>
+                        <Input value={apiEditor.apiBaseUrl} onChange={(event) => setApiEditor({ ...apiEditor, apiBaseUrl: event.target.value })} placeholder="https://your-server.example.com/social/share" />
+                        <p className="text-xs text-muted-foreground">
+                          The Edge Function sends a normalized JSON payload to this endpoint. Use your own backend, n8n, Make, Zapier, or an approved social API wrapper.
+                        </p>
+                      </div>
+                    ) : null}
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Account / destination ID</label>
+                      <Input value={apiEditor.accountId} onChange={(event) => setApiEditor({ ...apiEditor, accountId: event.target.value })} placeholder={apiEditor.platform === 'telegram' ? 'Telegram chat ID' : 'Page ID, author URN, account ID, or channel ID'} />
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">API code</label>
+                        <Input type="password" value={apiEditor.apiCode} onChange={(event) => setApiEditor({ ...apiEditor, apiCode: event.target.value })} placeholder="Optional x-api-code header" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Access token</label>
+                        <Input type="password" value={apiEditor.apiToken} onChange={(event) => setApiEditor({ ...apiEditor, apiToken: event.target.value })} placeholder={apiEditor.platform === 'telegram' ? 'Telegram bot token' : 'Bearer token, if required'} />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Secret / signing key</label>
+                      <Input type="password" value={apiEditor.apiSecret} onChange={(event) => setApiEditor({ ...apiEditor, apiSecret: event.target.value })} placeholder="Optional x-api-secret header" />
+                    </div>
+
                     <Button type="submit" disabled={apiConnectionMutation.isPending}>
-                      <Save className="h-4 w-4" /> {apiConnectionMutation.isPending ? 'Saving...' : 'Save connection'}
+                      <Save className="h-4 w-4" /> {apiConnectionMutation.isPending ? 'Saving...' : 'Save platform connection'}
                     </Button>
                   </form>
                 </CardContent>
@@ -1086,18 +1178,21 @@ export function AdminPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Saved API connections</CardTitle>
-                  <CardDescription>{apiConnections.length} platform configs</CardDescription>
+                  <CardTitle>Saved connections</CardTitle>
+                  <CardDescription>{apiConnections.length} configured platform{apiConnections.length === 1 ? '' : 's'}.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {apiConnections.length === 0 ? <p className="text-sm text-muted-foreground">No API connections saved yet.</p> : null}
+                  {apiConnections.length === 0 ? <p className="text-sm text-muted-foreground">No API connections saved yet. Pick a platform above and save its credentials first.</p> : null}
                   {apiConnections.map((connection) => (
                     <button key={connection.id} type="button" className="block w-full rounded-lg border p-3 text-left hover:bg-muted/50" onClick={() => setApiEditor(apiEditorFromConnection(connection))}>
                       <div className="flex items-center justify-between gap-3">
-                        <span className="font-medium">{connection.platform === 'x' ? 'X / Twitter' : connection.platform}</span>
+                        <span className="font-medium">{getPlatformLabel(connection.platform)}</span>
                         <Badge variant={connection.is_enabled ? 'default' : 'outline'}>{connection.is_enabled ? 'enabled' : 'disabled'}</Badge>
                       </div>
-                      <p className="mt-1 text-xs text-muted-foreground">{connection.label || connection.account_id || 'No label'}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{connection.label || connection.account_id || 'No label or destination ID saved'}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {connection.platform === 'telegram' ? 'Direct Telegram bot posting' : connection.api_base_url ? 'Webhook endpoint configured' : 'Missing webhook endpoint'}
+                      </p>
                     </button>
                   ))}
                 </CardContent>
@@ -1105,18 +1200,19 @@ export function AdminPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Recent share queue</CardTitle>
-                  <CardDescription>Last {shareQueue.length} queued posts</CardDescription>
+                  <CardTitle>Share queue</CardTitle>
+                  <CardDescription>Recent jobs created when content was published.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {shareQueue.length === 0 ? <p className="text-sm text-muted-foreground">No queued share jobs yet.</p> : null}
+                  {shareQueue.length === 0 ? <p className="text-sm text-muted-foreground">No queued share jobs yet. Publish a blog post or project while auto-share is enabled.</p> : null}
                   {shareQueue.slice(0, 8).map((item) => (
                     <div key={item.id} className="rounded-lg border p-3 text-sm">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-medium">{item.platform === 'x' ? 'X / Twitter' : item.platform}</span>
+                        <span className="font-medium">{getPlatformLabel(item.platform)}</span>
                         <Badge variant={item.status === 'sent' ? 'default' : item.status === 'failed' ? 'destructive' : 'outline'}>{item.status}</Badge>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">{String(item.payload?.title ?? item.entity_id)}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{item.entity_type} · attempts: {item.attempts}</p>
                       {item.error_message ? <p className="mt-1 text-xs text-destructive">{item.error_message}</p> : null}
                     </div>
                   ))}
