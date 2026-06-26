@@ -108,3 +108,36 @@ curl -X POST https://your-domain.com/api/webhooks/social-share \
 ```
 
 Read `docs/social-auto-share-requirements.md` for details.
+
+## Supabase SSR session setup
+
+This Next.js version uses `@supabase/ssr` for browser/server auth session handling.
+
+Added files:
+
+- `src/utils/supabase/client.ts` — browser Supabase client.
+- `src/utils/supabase/server.ts` — server component Supabase client using `next/headers` cookies.
+- `src/utils/supabase/middleware.ts` — refreshes sessions and writes updated cookies.
+- `src/middleware.ts` — applies the Supabase middleware to application routes.
+
+Install dependencies:
+
+```bash
+npm install @supabase/supabase-js @supabase/ssr
+```
+
+Local env:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=https://vvsuyntqnehrrrsnnlgo.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_6zFE4f7hcoejgByjC4Wqjw_pRZ3KQ7O
+```
+
+For auto-share webhooks, also set these server-only values in Vercel or `.env.local`:
+
+```bash
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+SOCIAL_SHARE_WEBHOOK_SECRET=change-this-secret
+```
+
+Do not expose `SUPABASE_SERVICE_ROLE_KEY` in client code.

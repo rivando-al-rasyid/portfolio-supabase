@@ -7,7 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert';
 import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
-import { isSupabaseConfigured } from '../../lib/supabase';
+import { isSupabaseConfigured } from '../../utils/supabase/client';
 import { useAuth } from './AuthProvider';
 
 export function LoginPage() {
