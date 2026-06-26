@@ -9,7 +9,7 @@ Built from the ground up using:
 - Supabase Postgres + RLS for CMS content storage
 - Supabase Storage for compressed CMS images
 - WordPress/Blogger-style CMS editor with slug generation, rich Markdown, images, YouTube embeds, and audio embeds
-- Stateless content source mode for GitHub README project pages and Markdown URL blog posts
+- Stateless content source mode for GitHub README project pages
 - React Query for data loading
 - Lightweight SVG knowledge graph, no heavy graph canvas dependency
 - Social share fallback dialog, share-event tracking, API-code database config, and queued auto-share jobs
@@ -92,8 +92,8 @@ Blog posts and projects also support:
 - YouTube embeds using `::youtube https://youtu.be/video_id`
 - Audio embeds using `::audio https://example.com/audio.mp3`
 - Project README import from a GitHub repository URL
-- Blog Markdown import from a remote URL or local `.md` file
-- Stateless source mode: GitHub README / Markdown URL content can be refreshed at public page load while stored CMS content remains the fallback
+- Blog Markdown import from a local `.md` / `.markdown` file
+- Stateless source mode: project GitHub README content can be refreshed at public page load while stored CMS content remains the fallback
 
 Images are compressed in the browser to WebP/JPEG and uploaded to the public Supabase Storage bucket named `portfolio-media`. Run `supabase/schema.sql` again if you are upgrading an older project so the bucket and storage policies are created.
 
@@ -123,13 +123,13 @@ The public blog/project detail pages render that input as polished CMS output wi
 
 ## Stateless CMS source mode
 
-The admin form has a **Stateless content source** selector:
+The admin form keeps README import project-only:
 
 - `Manual CMS content` stores and renders the `content` column from Supabase.
-- `GitHub README` is for projects. Paste a GitHub repository URL, click **Import README**, then save. The project detail loader can refresh the README from GitHub at page load; the saved content is kept as fallback.
-- `Markdown URL` is for blog posts. Paste a raw Markdown URL, click **Import URL**, then save. The blog detail loader can refresh the Markdown URL at page load; the saved content is kept as fallback.
+- `GitHub README` is for projects only. Paste a GitHub repository URL or README URL, click **Import README**, then save. Example: `https://github.com/rivando-al-rasyid/portfolio-supabase` or `https://github.com/rivando-al-rasyid/portfolio-supabase/blob/main/README.md`.
+- Blog posts do not use GitHub README import. Use **Import blog .md file** to fill blog inputs from a local `.md` / `.markdown` file.
 
-For local blog drafts, use **Import .md file**. File imports are stored as normal manual CMS content because a browser-selected local file cannot be fetched again by public visitors.
+File imports are stored as normal manual CMS content because a browser-selected local file cannot be fetched again by public visitors.
 
 When upgrading an existing Supabase database, run `supabase/schema.sql` again so these columns are added:
 

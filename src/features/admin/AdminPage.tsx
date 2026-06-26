@@ -34,7 +34,7 @@ import {
   updateSiteSettings,
   upsertSocialApiConnection
 } from '../../lib/contentService';
-import { fetchGitHubReadmeFromRepo, fetchMarkdownFromUrl, readMarkdownFile, type ImportedMarkdownContent } from '../../lib/contentImport';
+import { fetchGitHubReadmeFromRepo, readMarkdownFile, type ImportedMarkdownContent } from '../../lib/contentImport';
 import { formatBytes } from '../../lib/imageCompression';
 import { compressAndUploadImage } from '../../lib/mediaService';
 import { generateSeoDescription, generateSeoTitle, getCanonicalUrl, makeUniqueSlug, toSlug, truncateText } from '../../lib/utils';
@@ -308,7 +308,6 @@ export function AdminPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [githubImportUrl, setGithubImportUrl] = useState('');
-  const [markdownImportUrl, setMarkdownImportUrl] = useState('');
 
   const { data: posts = [] } = useQuery({ queryKey: ['admin', 'blog-posts'], queryFn: getAllBlogPosts });
   const { data: projects = [] } = useQuery({ queryKey: ['admin', 'projects'], queryFn: getAllProjects });
@@ -336,8 +335,8 @@ export function AdminPage() {
           slug,
           excerpt: state.description || null,
           content: state.content || '',
-          content_source: state.contentSource,
-          source_url: state.sourceUrl || null,
+          content_source: 'manual' as const,
+          source_url: null,
           cover_image: state.imageUrl || null,
           status: state.status,
           is_featured: state.isFeatured,
@@ -372,8 +371,8 @@ export function AdminPage() {
         slug,
         summary: state.description || null,
         content: state.content || '',
-        content_source: state.contentSource,
-        source_url: state.sourceUrl || null,
+        content_source: (state.contentSource === 'github_readme' ? 'github_readme' : 'manual') as ContentSource,
+        source_url: state.contentSource === 'github_readme' ? state.sourceUrl || state.repoUrl || null : null,
         image_url: state.imageUrl || null,
         demo_url: state.demoUrl || null,
         repo_url: state.repoUrl || null,
@@ -537,8 +536,8 @@ export function AdminPage() {
         slug: nextSlug,
         description: imported.description ?? current.description,
         content: imported.content,
-        contentSource: imported.source,
-        sourceUrl: imported.sourceUrl,
+        contentSource: targetType === 'project' && imported.source === 'github_readme' ? 'github_readme' : 'manual',
+        sourceUrl: targetType === 'project' && imported.source === 'github_readme' ? imported.sourceUrl : '',
         repoUrl: imported.repoUrl || current.repoUrl,
         demoUrl: imported.demoUrl || current.demoUrl,
         imageUrl: imported.imageUrl || current.imageUrl,
@@ -553,10 +552,7 @@ export function AdminPage() {
   }
 
   const contentImportMutation = useMutation({
-    mutationFn: async (input: { source: 'github-readme' | 'markdown-url'; targetType: EditableType; url: string }) => {
-      if (input.source === 'github-readme') return fetchGitHubReadmeFromRepo(input.url);
-      return fetchMarkdownFromUrl(input.url);
-    },
+    mutationFn: async (input: { targetType: 'project'; url: string }) => fetchGitHubReadmeFromRepo(input.url),
     onSuccess: (imported, variables) => {
       applyImportedContent(imported, variables.targetType);
     },
@@ -587,7 +583,6 @@ export function AdminPage() {
   function handleTypeChange(type: EditableType) {
     setEditor({ ...emptyEditor, type });
     setGithubImportUrl('');
-    setMarkdownImportUrl('');
   }
 
   function handleEdit(type: EditableType, item: BlogPost | Project) {
@@ -773,100 +768,83 @@ export function AdminPage() {
                   </div>
 
                   <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                      <div>
-                        <label className="text-sm font-medium">Stateless content source</label>
-                        <p className="text-xs text-muted-foreground">
-                          Manual content is saved in Supabase. GitHub README and Markdown URL modes can refresh content from the source at page load, with saved content as fallback.
-                        </p>
-                      </div>
-                      <Select
-                        className="sm:w-52"
-                        value={editor.contentSource}
-                        onChange={(event) => {
-                          const nextSource = event.target.value as ContentSource;
-                          setEditor({
-                            ...editor,
-                            contentSource: nextSource,
-                            sourceUrl:
-                              nextSource === 'manual'
-                                ? ''
-                                : nextSource === 'github_readme'
-                                  ? editor.sourceUrl || editor.repoUrl || githubImportUrl
-                                  : editor.sourceUrl || markdownImportUrl
-                          });
-                        }}
-                      >
-                        <option value="manual">Manual CMS content</option>
-                        <option value="github_readme">GitHub README</option>
-                        <option value="markdown_url">Markdown URL</option>
-                      </Select>
-                    </div>
+                    {editor.type === 'project' ? (
+                      <>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                          <div>
+                            <label className="text-sm font-medium">Project content source</label>
+                            <p className="text-xs text-muted-foreground">
+                              README import is only for projects. Paste a GitHub repository URL or a README URL, then import it into the fields above. GitHub README mode can refresh project content at page load, with saved content as fallback.
+                            </p>
+                          </div>
+                          <Select
+                            className="sm:w-52"
+                            value={editor.contentSource === 'github_readme' ? 'github_readme' : 'manual'}
+                            onChange={(event) => {
+                              const nextSource = event.target.value as ContentSource;
+                              setEditor({
+                                ...editor,
+                                contentSource: nextSource,
+                                sourceUrl: nextSource === 'github_readme' ? editor.sourceUrl || editor.repoUrl || githubImportUrl : ''
+                              });
+                            }}
+                          >
+                            <option value="manual">Manual CMS content</option>
+                            <option value="github_readme">GitHub README</option>
+                          </Select>
+                        </div>
 
-                    <div className="space-y-2">
-                      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                        <Input
-                          value={editor.type === 'project' ? editor.repoUrl : githubImportUrl}
-                          onChange={(event) => {
-                            const url = event.target.value;
-                            if (editor.type === 'project') {
-                              setEditor({ ...editor, repoUrl: url, sourceUrl: editor.contentSource === 'github_readme' ? url : editor.sourceUrl });
-                            } else {
-                              setGithubImportUrl(url);
-                              if (editor.contentSource === 'github_readme') setEditor({ ...editor, sourceUrl: url });
-                            }
-                          }}
-                          placeholder="GitHub repository URL, e.g. https://github.com/user/repository"
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={contentImportMutation.isPending || !(editor.type === 'project' ? editor.repoUrl : githubImportUrl).trim()}
-                          onClick={() =>
-                            contentImportMutation.mutate({
-                              source: 'github-readme',
-                              targetType: editor.type,
-                              url: editor.type === 'project' ? editor.repoUrl : githubImportUrl
-                            })
-                          }
-                        >
-                          {contentImportMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                          Import README
+                        <div className="space-y-2">
+                          <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                            <Input
+                              value={editor.repoUrl}
+                              onChange={(event) => {
+                                const url = event.target.value;
+                                setEditor({ ...editor, repoUrl: url, sourceUrl: editor.contentSource === 'github_readme' ? url : editor.sourceUrl });
+                              }}
+                              placeholder="GitHub repo or README URL, e.g. https://github.com/rivando-al-rasyid/portfolio-supabase"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={contentImportMutation.isPending || !editor.repoUrl.trim()}
+                              onClick={() => contentImportMutation.mutate({ targetType: 'project', url: editor.repoUrl })}
+                            >
+                              {contentImportMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                              Import README
+                            </Button>
+                          </div>
+                          <Button type="button" variant="outline" asChild>
+                            <label className="cursor-pointer">
+                              <Upload className="h-4 w-4" />
+                              Import project .md file
+                              <input type="file" accept=".md,.markdown,text/markdown,text/plain" className="sr-only" onChange={handleMarkdownFileImport} />
+                            </label>
+                          </Button>
+                          <p className="text-xs text-muted-foreground">
+                            Example accepted URLs: https://github.com/rivando-al-rasyid/portfolio-supabase or https://github.com/rivando-al-rasyid/portfolio-supabase/blob/main/README.md.
+                          </p>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="space-y-2">
+                        <div>
+                          <label className="text-sm font-medium">Blog import</label>
+                          <p className="text-xs text-muted-foreground">
+                            Blog content uses manual CMS content. Import a local .md/.markdown file to fill title, slug, excerpt, content, categories, cover image, status, featured flag, and sort order. GitHub README import is only for projects.
+                          </p>
+                        </div>
+                        <Button type="button" variant="outline" asChild>
+                          <label className="cursor-pointer">
+                            <Upload className="h-4 w-4" />
+                            Import blog .md file
+                            <input type="file" accept=".md,.markdown,text/markdown,text/plain" className="sr-only" onChange={handleMarkdownFileImport} />
+                          </label>
                         </Button>
                       </div>
-                      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                        <Input
-                          value={markdownImportUrl}
-                          onChange={(event) => {
-                            const url = event.target.value;
-                            setMarkdownImportUrl(url);
-                            if (editor.contentSource === 'markdown_url') setEditor({ ...editor, sourceUrl: url });
-                          }}
-                          placeholder="Markdown URL, e.g. https://raw.githubusercontent.com/user/repo/main/post.md"
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={contentImportMutation.isPending || !markdownImportUrl.trim()}
-                          onClick={() => contentImportMutation.mutate({ source: 'markdown-url', targetType: editor.type, url: markdownImportUrl })}
-                        >
-                          {contentImportMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                          Import Markdown
-                        </Button>
-                      </div>
-                      <Button type="button" variant="outline" asChild>
-                        <label className="cursor-pointer">
-                          <Upload className="h-4 w-4" />
-                          Import .md file
-                          <input type="file" accept=".md,.markdown,text/markdown,text/plain" className="sr-only" onChange={handleMarkdownFileImport} />
-                        </label>
-                      </Button>
-                      <p className="text-xs text-muted-foreground">
-                        Import fills every matching input: title, slug, description, content, categories, image URL, repo URL, demo URL, status, featured flag, and sort order when available.
-                      </p>
-                    </div>
+                    )}
 
-                    {editor.sourceUrl ? <p className="break-all text-xs text-muted-foreground">Source: {editor.sourceUrl}</p> : null}
+                    {editor.type === 'project' && editor.sourceUrl ? <p className="break-all text-xs text-muted-foreground">Source: {editor.sourceUrl}</p> : null}
                   </div>
 
                   <div className="space-y-2">

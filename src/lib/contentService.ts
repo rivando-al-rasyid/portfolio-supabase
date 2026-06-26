@@ -65,33 +65,7 @@ function uniqueCategoryNames(names: string[]) {
 }
 
 async function resolveBlogContent(post: BlogPost): Promise<BlogPost> {
-  if (!post.source_url) return post;
-
-  try {
-    if (post.content_source === 'github_readme') {
-      const imported = await fetchGitHubReadmeFromRepo(post.source_url);
-      return {
-        ...post,
-        content: imported.content,
-        excerpt: post.excerpt || imported.description || null,
-        cover_image: post.cover_image || imported.imageUrl || null,
-        source_url: imported.sourceUrl
-      };
-    }
-
-    if (post.content_source === 'markdown_url') {
-      const imported = await fetchMarkdownFromUrl(post.source_url);
-      return {
-        ...post,
-        content: imported.content,
-        excerpt: post.excerpt || imported.description || null,
-        cover_image: post.cover_image || imported.imageUrl || null
-      };
-    }
-  } catch (error) {
-    console.warn('Using stored blog content because stateless import failed:', error instanceof Error ? error.message : error);
-  }
-
+  // Blog posts are stored as manual CMS content. README/stateless refresh is intentionally project-only.
   return post;
 }
 
