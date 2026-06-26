@@ -362,7 +362,7 @@ export async function getSocialApiConnections() {
 }
 
 export async function upsertSocialApiConnection(
-  payload: Pick<SocialApiConnection, 'platform' | 'label' | 'is_enabled' | 'api_base_url' | 'api_code' | 'api_token' | 'api_secret' | 'account_id' | 'extra_config'>
+  payload: Pick<SocialApiConnection, 'platform' | 'label' | 'is_enabled' | 'api_code' | 'api_token' | 'api_secret' | 'account_id' | 'extra_config'>
 ) {
   const { data, error } = await supabase
     .from('social_api_connections')

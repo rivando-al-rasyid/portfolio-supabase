@@ -66,7 +66,6 @@ interface ApiConnectionEditorState {
   platform: SharePlatform;
   label: string;
   isEnabled: boolean;
-  apiBaseUrl: string;
   apiCode: string;
   apiToken: string;
   apiSecret: string;
@@ -103,23 +102,65 @@ const platformLabels: Record<SharePlatform, string> = {
 };
 
 const platformDescriptions: Record<SharePlatform, string> = {
-  linkedin: 'Use a posting webhook or approved LinkedIn API service.',
-  x: 'Use a posting webhook or approved X API service.',
-  facebook: 'Use a Page publishing webhook or approved Meta API service.',
-  whatsapp: 'Use WhatsApp Business, n8n, Make, Zapier, or your own webhook.',
-  telegram: 'Direct posting uses bot token and chat ID. No webhook endpoint is required.',
-  email: 'Use an email provider webhook such as Resend, SendGrid, or your own endpoint.'
+  linkedin: 'Next.js posts with the LinkedIn API. Use an access token with posting permission and an author URN such as urn:li:person:... or urn:li:organization:...',
+  x: 'Next.js posts with the X API v2 tweet endpoint. Use a user access token with tweet.write permission.',
+  facebook: 'Next.js posts with the Meta Graph Page feed endpoint. Use a Page ID and Page access token.',
+  whatsapp: 'Next.js posts with the WhatsApp Cloud API. Use phone number ID, recipient number, and a Meta access token.',
+  telegram: 'Next.js posts directly with Telegram Bot API. Use bot token and chat ID.',
+  email: 'Next.js sends through Resend. Use a Resend API key and recipient email address.'
 };
 
 function getPlatformLabel(platform: SharePlatform) {
   return platformLabels[platform] ?? platform;
 }
 
+function getDestinationLabel(platform: SharePlatform) {
+  if (platform === 'telegram') return 'Telegram chat ID';
+  if (platform === 'linkedin') return 'LinkedIn author URN';
+  if (platform === 'facebook') return 'Facebook Page ID';
+  if (platform === 'whatsapp') return 'WhatsApp phone number ID';
+  if (platform === 'email') return 'Recipient email';
+  return 'Account / destination ID';
+}
+
+function getDestinationPlaceholder(platform: SharePlatform) {
+  if (platform === 'telegram') return 'Example: 123456789 or -1001234567890';
+  if (platform === 'linkedin') return 'Example: urn:li:person:abc123 or urn:li:organization:12345';
+  if (platform === 'facebook') return 'Example: 123456789012345';
+  if (platform === 'whatsapp') return 'Example: WhatsApp phone number ID from Meta';
+  if (platform === 'email') return 'Example: you@example.com';
+  return 'Only required when the platform API needs it';
+}
+
+function getApiCodeLabel(platform: SharePlatform) {
+  if (platform === 'email') return 'From email';
+  if (platform === 'whatsapp') return 'Recipient number';
+  return 'API code';
+}
+
+function getApiCodePlaceholder(platform: SharePlatform) {
+  if (platform === 'email') return 'Example: Portfolio <hello@example.com>';
+  if (platform === 'whatsapp') return 'Example: 6281234567890';
+  return 'Optional platform code, if required';
+}
+
+function getTokenLabel(platform: SharePlatform) {
+  if (platform === 'telegram') return 'Bot token';
+  if (platform === 'email') return 'Resend API key';
+  return 'Access token';
+}
+
+function getTokenPlaceholder(platform: SharePlatform) {
+  if (platform === 'telegram') return 'Telegram bot token';
+  if (platform === 'email') return 're_...';
+  return 'Platform access token with posting permission';
+}
+
+
 const emptyApiEditor: ApiConnectionEditorState = {
   platform: 'linkedin',
   label: '',
   isEnabled: true,
-  apiBaseUrl: '',
   apiCode: '',
   apiToken: '',
   apiSecret: '',
@@ -173,7 +214,6 @@ function apiEditorFromConnection(connection: SocialApiConnection): ApiConnection
     platform: connection.platform,
     label: connection.label ?? '',
     isEnabled: connection.is_enabled,
-    apiBaseUrl: connection.api_base_url ?? '',
     apiCode: connection.api_code ?? '',
     apiToken: connection.api_token ?? '',
     apiSecret: connection.api_secret ?? '',
@@ -479,7 +519,6 @@ export function AdminPage() {
         platform: state.platform,
         label: state.label || null,
         is_enabled: state.isEnabled,
-        api_base_url: state.platform === 'telegram' ? null : state.apiBaseUrl || null,
         api_code: state.apiCode || null,
         api_token: state.apiToken || null,
         api_secret: state.apiSecret || null,
@@ -1008,7 +1047,7 @@ export function AdminPage() {
                 <CardHeader>
                   <CardTitle>Auto-share workflow</CardTitle>
                   <CardDescription>
-                    Auto-share does not post from the browser. Published blog/project items are added to a queue, then a Next.js webhook endpoint sends them using your saved platform connection.
+                    Auto-share does not post from the browser. Published blog/project items are added to a queue, then the Next.js API route sends them using built-in platform adapters.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -1058,7 +1097,7 @@ export function AdminPage() {
                     <div>
                       <h3 className="font-medium">Destination platforms</h3>
                       <p className="text-sm text-muted-foreground">
-                        Choose where new blog/project posts are queued. A platform must also have an enabled API connection before the Next.js webhook endpoint can send it.
+                        Choose where new blog/project posts are queued. A platform must also have an enabled connection before the Next.js sender can publish it.
                       </p>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
@@ -1097,7 +1136,7 @@ export function AdminPage() {
                     <div>
                       <label className="text-sm font-medium">Share message template</label>
                       <p className="text-sm text-muted-foreground">
-                        This text is rendered by the Next.js webhook endpoint before posting. Keep it simple so the same template works across multiple platforms.
+                        This text is rendered by the Next.js sender before posting. Keep it simple so the same template works across multiple platforms.
                       </p>
                     </div>
                     <Textarea name="template" defaultValue={shareSettings.default_message_template} className="min-h-28" />
@@ -1113,7 +1152,7 @@ export function AdminPage() {
                   <Alert>
                     <AlertTitle>How sending works</AlertTitle>
                     <AlertDescription>
-                      Call <code>/api/webhooks/social-share</code> from Vercel Cron, Supabase Scheduled Functions, or another server-side scheduler. The dashboard does not run the processor manually because production posting should happen outside the browser.
+                      Call <code>/api/webhooks/social-share</code> from Vercel Cron, Supabase Scheduled Functions, or another server-side scheduler. The dashboard does not need a webhook URL input because this Next.js route is the sender.
                     </AlertDescription>
                   </Alert>
                 </CardContent>
@@ -1125,7 +1164,7 @@ export function AdminPage() {
                 <CardHeader>
                   <CardTitle>Platform connection</CardTitle>
                   <CardDescription>
-                    Save one reusable connection per platform. Existing platform rows are updated, so you do not create duplicate configs.
+                    Save one reusable credential set per platform. The posting endpoint is generated by Next.js, so you only store the destination ID and tokens needed by each platform.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1159,35 +1198,32 @@ export function AdminPage() {
                       <Input value={apiEditor.label} onChange={(event) => setApiEditor({ ...apiEditor, label: event.target.value })} placeholder="Personal LinkedIn, portfolio Telegram, etc." />
                     </div>
 
-                    {apiEditor.platform !== 'telegram' ? (
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Webhook / posting endpoint</label>
-                        <Input value={apiEditor.apiBaseUrl} onChange={(event) => setApiEditor({ ...apiEditor, apiBaseUrl: event.target.value })} placeholder="https://your-server.example.com/social/share" />
-                        <p className="text-xs text-muted-foreground">
-                          The Next.js webhook endpoint sends a normalized JSON payload to this endpoint. Use your own backend, n8n, Make, Zapier, or an approved social API wrapper.
-                        </p>
-                      </div>
-                    ) : null}
+                    <Alert>
+                      <AlertTitle>Endpoint is handled by Next.js</AlertTitle>
+                      <AlertDescription>
+                        You do not need to paste a webhook URL. The scheduler calls <code>/api/webhooks/social-share</code>, then this app chooses the correct platform API endpoint on the server.
+                      </AlertDescription>
+                    </Alert>
 
                     <div className="space-y-2">
-                      <label className="text-sm font-medium">Account / destination ID</label>
-                      <Input value={apiEditor.accountId} onChange={(event) => setApiEditor({ ...apiEditor, accountId: event.target.value })} placeholder={apiEditor.platform === 'telegram' ? 'Telegram chat ID' : 'Page ID, author URN, account ID, or channel ID'} />
+                      <label className="text-sm font-medium">{getDestinationLabel(apiEditor.platform)}</label>
+                      <Input value={apiEditor.accountId} onChange={(event) => setApiEditor({ ...apiEditor, accountId: event.target.value })} placeholder={getDestinationPlaceholder(apiEditor.platform)} />
                     </div>
 
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">API code</label>
-                        <Input type="password" value={apiEditor.apiCode} onChange={(event) => setApiEditor({ ...apiEditor, apiCode: event.target.value })} placeholder="Optional x-api-code header" />
+                        <label className="text-sm font-medium">{getApiCodeLabel(apiEditor.platform)}</label>
+                        <Input type="password" value={apiEditor.apiCode} onChange={(event) => setApiEditor({ ...apiEditor, apiCode: event.target.value })} placeholder={getApiCodePlaceholder(apiEditor.platform)} />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">Access token</label>
-                        <Input type="password" value={apiEditor.apiToken} onChange={(event) => setApiEditor({ ...apiEditor, apiToken: event.target.value })} placeholder={apiEditor.platform === 'telegram' ? 'Telegram bot token' : 'Bearer token, if required'} />
+                        <label className="text-sm font-medium">{getTokenLabel(apiEditor.platform)}</label>
+                        <Input type="password" value={apiEditor.apiToken} onChange={(event) => setApiEditor({ ...apiEditor, apiToken: event.target.value })} placeholder={getTokenPlaceholder(apiEditor.platform)} />
                       </div>
                     </div>
 
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Secret / signing key</label>
-                      <Input type="password" value={apiEditor.apiSecret} onChange={(event) => setApiEditor({ ...apiEditor, apiSecret: event.target.value })} placeholder="Optional x-api-secret header" />
+                      <Input type="password" value={apiEditor.apiSecret} onChange={(event) => setApiEditor({ ...apiEditor, apiSecret: event.target.value })} placeholder="Optional signing key / client secret if your platform flow needs it" />
                     </div>
 
                     <Button type="submit" disabled={apiConnectionMutation.isPending}>
@@ -1212,7 +1248,7 @@ export function AdminPage() {
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">{connection.label || connection.account_id || 'No label or destination ID saved'}</p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {connection.platform === 'telegram' ? 'Direct Telegram bot posting' : connection.api_base_url ? 'Webhook endpoint configured' : 'Missing webhook endpoint'}
+                        Next.js direct sender configured
                       </p>
                     </button>
                   ))}

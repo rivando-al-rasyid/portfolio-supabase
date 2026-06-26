@@ -159,7 +159,6 @@ create table if not exists social_api_connections (
   platform share_platform not null unique,
   label text,
   is_enabled boolean not null default true,
-  api_base_url text,
   api_code text,
   api_token text,
   api_secret text,
@@ -216,6 +215,8 @@ create index if not exists idx_category_name on categories using gin (to_tsvecto
 create index if not exists idx_share_queue_status on social_share_queue(status, scheduled_at);
 create index if not exists idx_share_events_entity on share_events(entity_type, entity_id);
 create index if not exists idx_social_api_platform on social_api_connections(platform);
+
+alter table social_api_connections drop column if exists api_base_url;
 
 alter table blog_posts enable row level security;
 alter table projects enable row level security;

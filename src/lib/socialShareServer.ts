@@ -6,16 +6,6 @@ interface ProcessOptions {
   limit?: number;
 }
 
-interface WebhookPayload {
-  platform: SharePlatform;
-  message: string;
-  accountId: string | null;
-  payload: Record<string, unknown>;
-  queueId: string;
-  entityType: string;
-  entityId: string;
-}
-
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
   return {};
@@ -34,53 +24,160 @@ function renderTemplate(template: string, payload: Record<string, unknown>) {
   return template.replace(/{{\s*(title|description|url|type|categories)\s*}}/g, (_, key: string) => values[key] ?? '').trim();
 }
 
-async function postToPlatform(connection: SocialApiConnection, item: SocialShareQueueItem, message: string) {
+async function readError(response: Response) {
+  const body = await response.text().catch(() => '');
+  return body ? `${response.status}: ${body}` : String(response.status);
+}
+
+function requireValue(value: string | null | undefined, label: string) {
+  if (!value?.trim()) throw new Error(`${label} is missing.`);
+  return value.trim();
+}
+
+async function postTelegram(connection: SocialApiConnection, message: string) {
+  const botToken = requireValue(connection.api_token, 'Telegram bot token');
+  const chatId = requireValue(connection.account_id, 'Telegram chat ID');
+
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: message,
+      disable_web_page_preview: false
+    })
+  });
+
+  if (!response.ok) throw new Error(`Telegram returned ${await readError(response)}`);
+}
+
+async function postX(connection: SocialApiConnection, message: string) {
+  const token = requireValue(connection.api_token, 'X access token');
+  const response = await fetch('https://api.twitter.com/2/tweets', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({ text: message.slice(0, 280) })
+  });
+
+  if (!response.ok) throw new Error(`X returned ${await readError(response)}`);
+}
+
+async function postFacebook(connection: SocialApiConnection, message: string) {
+  const pageId = requireValue(connection.account_id, 'Facebook Page ID');
+  const token = requireValue(connection.api_token, 'Facebook Page access token');
+  const form = new URLSearchParams({ message, access_token: token });
+
+  const response = await fetch(`https://graph.facebook.com/v19.0/${pageId}/feed`, {
+    method: 'POST',
+    body: form
+  });
+
+  if (!response.ok) throw new Error(`Facebook returned ${await readError(response)}`);
+}
+
+async function postLinkedIn(connection: SocialApiConnection, item: SocialShareQueueItem, message: string) {
+  const author = requireValue(connection.account_id, 'LinkedIn author URN');
+  const token = requireValue(connection.api_token, 'LinkedIn access token');
   const payload = asRecord(item.payload);
+  const url = String(payload.url ?? '');
 
-  if (connection.platform === 'telegram') {
-    if (!connection.api_token) throw new Error('Telegram bot token is missing.');
-    if (!connection.account_id) throw new Error('Telegram chat ID is missing.');
-
-    const response = await fetch(`https://api.telegram.org/bot${connection.api_token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: connection.account_id,
-        text: message,
-        disable_web_page_preview: false
-      })
-    });
-
-    if (!response.ok) throw new Error(`Telegram returned ${response.status}: ${await response.text()}`);
-    return;
-  }
-
-  if (!connection.api_base_url) {
-    throw new Error('Webhook / posting endpoint is missing for this platform.');
-  }
-
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
-  if (connection.api_token) headers.authorization = `Bearer ${connection.api_token}`;
-  if (connection.api_code) headers['x-api-code'] = connection.api_code;
-  if (connection.api_secret) headers['x-api-secret'] = connection.api_secret;
-
-  const body: WebhookPayload = {
-    platform: connection.platform,
-    message,
-    accountId: connection.account_id,
-    payload,
-    queueId: item.id,
-    entityType: item.entity_type,
-    entityId: item.entity_id
+  const body = {
+    author,
+    lifecycleState: 'PUBLISHED',
+    specificContent: {
+      'com.linkedin.ugc.ShareContent': {
+        shareCommentary: { text: message },
+        shareMediaCategory: url ? 'ARTICLE' : 'NONE',
+        media: url
+          ? [
+              {
+                status: 'READY',
+                originalUrl: url,
+                title: { text: String(payload.title ?? 'New post') }
+              }
+            ]
+          : []
+      }
+    },
+    visibility: {
+      'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC'
+    }
   };
 
-  const response = await fetch(connection.api_base_url, {
+  const response = await fetch('https://api.linkedin.com/v2/ugcPosts', {
     method: 'POST',
-    headers,
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+      'x-restli-protocol-version': '2.0.0'
+    },
     body: JSON.stringify(body)
   });
 
-  if (!response.ok) throw new Error(`Webhook returned ${response.status}: ${await response.text()}`);
+  if (!response.ok) throw new Error(`LinkedIn returned ${await readError(response)}`);
+}
+
+async function postWhatsApp(connection: SocialApiConnection, message: string) {
+  const phoneNumberId = requireValue(connection.account_id, 'WhatsApp phone number ID');
+  const recipientNumber = requireValue(connection.api_code, 'WhatsApp recipient number');
+  const token = requireValue(connection.api_token, 'WhatsApp access token');
+
+  const response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: recipientNumber,
+      type: 'text',
+      text: {
+        preview_url: true,
+        body: message
+      }
+    })
+  });
+
+  if (!response.ok) throw new Error(`WhatsApp returned ${await readError(response)}`);
+}
+
+async function postEmail(connection: SocialApiConnection, item: SocialShareQueueItem, message: string) {
+  const apiKey = requireValue(connection.api_token, 'Resend API key');
+  const to = requireValue(connection.account_id, 'recipient email');
+  const from = connection.api_code?.trim() || process.env.SOCIAL_SHARE_EMAIL_FROM || 'Portfolio <onboarding@resend.dev>';
+  const payload = asRecord(item.payload);
+  const subject = `New ${String(payload.type ?? 'content')}: ${String(payload.title ?? 'Portfolio update')}`;
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      from,
+      to,
+      subject,
+      text: message
+    })
+  });
+
+  if (!response.ok) throw new Error(`Email provider returned ${await readError(response)}`);
+}
+
+async function postToPlatform(connection: SocialApiConnection, item: SocialShareQueueItem, message: string) {
+  if (connection.platform === 'telegram') return postTelegram(connection, message);
+  if (connection.platform === 'x') return postX(connection, message);
+  if (connection.platform === 'facebook') return postFacebook(connection, message);
+  if (connection.platform === 'linkedin') return postLinkedIn(connection, item, message);
+  if (connection.platform === 'whatsapp') return postWhatsApp(connection, message);
+  if (connection.platform === 'email') return postEmail(connection, item, message);
+
+  throw new Error(`Unsupported platform: ${connection.platform}`);
 }
 
 export async function processSocialShareQueue({ limit = 10 }: ProcessOptions = {}) {

@@ -100,7 +100,6 @@ export interface SocialApiConnection {
   platform: SharePlatform;
   label: string | null;
   is_enabled: boolean;
-  api_base_url: string | null;
   api_code: string | null;
   api_token: string | null;
   api_secret: string | null;
