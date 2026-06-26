@@ -1,29 +1,76 @@
-# Social auto-share setup
+# Social auto-share requirements
 
-This project stores social API configuration in `social_api_connections` and queues jobs in `social_share_queue` when a blog post or project becomes published.
+Auto-share is now handled by **Next.js API routes**, not browser code.
 
-## Why an Edge Function is needed
+## Why the webhook endpoint exists
 
-Do not post to LinkedIn, X, Facebook, email, or other APIs directly from the Vite frontend. Browser code exposes API tokens. The included `process-social-share` Supabase Edge Function reads the API code/token from the database using the service role key and processes queued jobs server-side.
+Social tokens and API codes should not be used directly from React components. The CMS only saves connection settings into the database. Actual posting runs server-side through:
 
-## Basic flow
+- `POST /api/webhooks/social-share` — processes queued share jobs.
+- `POST /api/webhooks/content-published` — optional webhook that can enqueue jobs when an external CMS/database event says content was published.
 
-1. Run `supabase/schema.sql`.
-2. In `/admin`, open **Auto-share**.
-3. Enable the platforms you want.
-4. Save an API connection for each platform.
-5. Publish a blog post or project.
-6. Deploy the Edge Function:
+Both endpoints accept either:
 
-```bash
-supabase functions deploy process-social-share
+```http
+x-webhook-secret: your-secret
 ```
 
-7. Run the processor manually from the dashboard, or schedule it from Supabase/cron.
+or:
 
-## Platform behavior
+```http
+Authorization: Bearer your-secret
+```
 
-- `telegram`: uses `api_token` as bot token and `account_id` as chat id.
-- `linkedin`, `x`, `facebook`, `whatsapp`, `email`: posts a normalized JSON payload to `api_base_url` with optional `Authorization: Bearer <api_token>`, `x-api-code`, and `x-api-secret` headers.
+Set the value in `SOCIAL_SHARE_WEBHOOK_SECRET`.
 
-Direct LinkedIn/X/Facebook posting usually needs OAuth app approval and platform-specific request bodies. Using a small backend, Supabase Edge Function extension, n8n, Make, or Zapier webhook as `api_base_url` is safer than putting all platform-specific logic in the React app.
+## Required environment variables
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
+NEXT_PUBLIC_SITE_URL=https://your-domain.com
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+SOCIAL_SHARE_WEBHOOK_SECRET=change-this-secret
+```
+
+## How posting works
+
+1. Publish a blog post or project from `/admin`.
+2. The CMS inserts rows into `social_share_queue` for the active platforms.
+3. A scheduler calls `POST /api/webhooks/social-share`.
+4. The endpoint reads `social_api_connections` using the Supabase service role key.
+5. Telegram can post directly with bot token + chat ID.
+6. Other platforms post to your saved `api_base_url` as a normalized webhook payload.
+
+## Example scheduler request
+
+```bash
+curl -X POST https://your-domain.com/api/webhooks/social-share \
+  -H "content-type: application/json" \
+  -H "x-webhook-secret: change-this-secret" \
+  -d '{"limit":10}'
+```
+
+Use Vercel Cron, Supabase Scheduled Functions, GitHub Actions cron, n8n, Make, Zapier, or any trusted server to call it.
+
+## Normalized payload sent to non-Telegram platforms
+
+```json
+{
+  "platform": "linkedin",
+  "message": "New project: Portfolio Supabase https://example.com/projects/portfolio-supabase",
+  "accountId": "author-or-page-id",
+  "payload": {
+    "title": "Portfolio Supabase",
+    "description": "Modern portfolio CMS",
+    "url": "https://example.com/projects/portfolio-supabase",
+    "type": "project",
+    "categories": ["React", "Supabase"]
+  },
+  "queueId": "uuid",
+  "entityType": "project",
+  "entityId": "uuid"
+}
+```
+
+This design is intentional. Direct LinkedIn/X/Facebook posting often requires OAuth review and platform-specific request bodies. A normalized webhook lets you connect an approved backend or automation tool without exposing secrets in the frontend.

@@ -1,5 +1,7 @@
-import { ChangeEvent, FormEvent, KeyboardEvent, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+'use client';
+
+import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ImageIcon, Loader2, LogOut, Pencil, Plus, RefreshCw, Save, Settings, Trash2, Upload, X } from 'lucide-react';
 import { CmsRichTextEditor } from '../../components/CmsRichTextEditor';
@@ -37,7 +39,6 @@ import { formatBytes } from '../../lib/imageCompression';
 import { compressAndUploadImage } from '../../lib/mediaService';
 import { generateSeoDescription, generateSeoTitle, getCanonicalUrl, makeUniqueSlug, toSlug, truncateText } from '../../lib/utils';
 import { useAuth } from '../auth/AuthProvider';
-import { SEO } from '../seo/SEO';
 import type { BlogPost, Category, ContentSource, Project, SharePlatform, SiteSettings, SocialApiConnection } from '../../types/content';
 
 type EditableType = 'blog' | 'project';
@@ -316,8 +317,8 @@ function CategoryPicker({
 }
 
 export function AdminPage() {
-  const { user, signOut } = useAuth();
-  const navigate = useNavigate();
+  const { user, loading: authLoading, signOut } = useAuth();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>('content');
   const [editor, setEditor] = useState<EditorState>(emptyEditor);
@@ -333,6 +334,12 @@ export function AdminPage() {
   const { data: apiConnections = [] } = useQuery({ queryKey: ['admin', 'social-api-connections'], queryFn: getSocialApiConnections });
   const { data: shareQueue = [] } = useQuery({ queryKey: ['admin', 'share-queue'], queryFn: getShareQueue });
   const { data: siteSettings } = useQuery({ queryKey: ['admin', 'site-settings'], queryFn: getSiteSettings });
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace('/login');
+    }
+  }, [authLoading, router, user]);
 
   const saveMutation = useMutation({
     mutationFn: async (state: EditorState) => {
@@ -612,7 +619,7 @@ export function AdminPage() {
 
   async function handleLogout() {
     await signOut();
-    navigate('/login', { replace: true });
+    router.replace('/login');
   }
 
   function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
@@ -664,9 +671,23 @@ export function AdminPage() {
     });
   }
 
+  if (authLoading) {
+    return (
+      <section className="mx-auto max-w-6xl px-4 py-10">
+        <Card>
+          <CardHeader>
+            <CardTitle>Checking admin session...</CardTitle>
+            <CardDescription>Please wait while Supabase restores your login session.</CardDescription>
+          </CardHeader>
+        </Card>
+      </section>
+    );
+  }
+
+  if (!user) return null;
+
   return (
     <>
-      <SEO title="CMS Dashboard" description="Manage portfolio content." path="/admin" />
       <section className="mx-auto max-w-6xl px-4 py-10">
         <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
@@ -987,7 +1008,7 @@ export function AdminPage() {
                 <CardHeader>
                   <CardTitle>Auto-share workflow</CardTitle>
                   <CardDescription>
-                    Auto-share does not post from the browser. Published blog/project items are added to a queue, then a Supabase Edge Function sends them using your saved platform connection.
+                    Auto-share does not post from the browser. Published blog/project items are added to a queue, then a Next.js webhook endpoint sends them using your saved platform connection.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -1037,7 +1058,7 @@ export function AdminPage() {
                     <div>
                       <h3 className="font-medium">Destination platforms</h3>
                       <p className="text-sm text-muted-foreground">
-                        Choose where new blog/project posts are queued. A platform must also have an enabled API connection before the Edge Function can send it.
+                        Choose where new blog/project posts are queued. A platform must also have an enabled API connection before the Next.js webhook endpoint can send it.
                       </p>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
@@ -1076,7 +1097,7 @@ export function AdminPage() {
                     <div>
                       <label className="text-sm font-medium">Share message template</label>
                       <p className="text-sm text-muted-foreground">
-                        This text is rendered by the Edge Function before posting. Keep it simple so the same template works across multiple platforms.
+                        This text is rendered by the Next.js webhook endpoint before posting. Keep it simple so the same template works across multiple platforms.
                       </p>
                     </div>
                     <Textarea name="template" defaultValue={shareSettings.default_message_template} className="min-h-28" />
@@ -1092,7 +1113,7 @@ export function AdminPage() {
                   <Alert>
                     <AlertTitle>How sending works</AlertTitle>
                     <AlertDescription>
-                      Deploy <code>process-social-share</code> and call it from a scheduled job or server-side webhook. The dashboard no longer includes a manual “run processor” button because production posting should happen outside the public admin page.
+                      Call <code>/api/webhooks/social-share</code> from Vercel Cron, Supabase Scheduled Functions, or another server-side scheduler. The dashboard does not run the processor manually because production posting should happen outside the browser.
                     </AlertDescription>
                   </Alert>
                 </CardContent>
@@ -1143,7 +1164,7 @@ export function AdminPage() {
                         <label className="text-sm font-medium">Webhook / posting endpoint</label>
                         <Input value={apiEditor.apiBaseUrl} onChange={(event) => setApiEditor({ ...apiEditor, apiBaseUrl: event.target.value })} placeholder="https://your-server.example.com/social/share" />
                         <p className="text-xs text-muted-foreground">
-                          The Edge Function sends a normalized JSON payload to this endpoint. Use your own backend, n8n, Make, Zapier, or an approved social API wrapper.
+                          The Next.js webhook endpoint sends a normalized JSON payload to this endpoint. Use your own backend, n8n, Make, Zapier, or an approved social API wrapper.
                         </p>
                       </div>
                     ) : null}

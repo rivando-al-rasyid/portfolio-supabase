@@ -1,5 +1,7 @@
+'use client';
+
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import Link from 'next/link';
 import { Network } from 'lucide-react';
 import { Badge } from '../../components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
@@ -91,7 +93,7 @@ export function KnowledgeGraph({ data, compact = false }: { data: GraphData; com
               <h3 className="mt-3 text-lg font-semibold">{selected.label}</h3>
               <p className="mt-2 text-sm text-muted-foreground">{selected.description || 'No description yet.'}</p>
               {selected.type !== 'category' ? (
-                <Link to={nodePath(selected)} className="mt-4 inline-flex text-sm font-medium text-primary hover:underline">
+                <Link href={nodePath(selected)} className="mt-4 inline-flex text-sm font-medium text-primary hover:underline">
                   Open detail
                 </Link>
               ) : null}

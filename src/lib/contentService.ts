@@ -407,11 +407,14 @@ export async function enqueueShareJobs(input: {
 }
 
 export async function runSocialShareProcessor() {
-  const { data, error } = await supabase.functions.invoke('process-social-share', {
-    body: { limit: 10 }
+  const response = await fetch('/api/webhooks/social-share', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ limit: 10 })
   });
-  if (error) throw error;
-  return data as { processed?: number; failed?: number; message?: string };
+
+  if (!response.ok) throw new Error(await response.text());
+  return (await response.json()) as { processed?: number; failed?: number; message?: string };
 }
 
 export async function trackShareEvent(input: {

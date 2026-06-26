@@ -88,10 +88,10 @@ export function makeUniqueSlug(baseValue: string, existingSlugs: string[], curre
 }
 
 export function getSiteUrl() {
-  const configured = import.meta.env.VITE_SITE_URL as string | undefined;
+  const configured = process.env.NEXT_PUBLIC_SITE_URL;
   if (configured) return configured.replace(/\/$/, '');
   if (typeof window !== 'undefined') return window.location.origin;
-  return 'http://localhost:5173';
+  return 'http://localhost:3000';
 }
 
 export function getCanonicalUrl(path: string) {

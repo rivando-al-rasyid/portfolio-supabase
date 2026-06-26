@@ -1,200 +1,110 @@
-# Portfolio Knowledge Graph
+# Portfolio Supabase — Next.js CMS
 
-Built from the ground up using:
+A modern personal portfolio and CMS built with **Next.js App Router**, React, Tailwind CSS 4, and Supabase.
 
-- React + TypeScript + Vite
-- Tailwind CSS 4 through `@tailwindcss/vite`
-- shadcn/ui-style local components in `src/components/ui`
-- Supabase Auth for admin login
-- Supabase Postgres + RLS for CMS content storage
-- Supabase Storage for compressed CMS images
-- WordPress/Blogger-style CMS editor with slug generation, rich Markdown, images, YouTube embeds, and audio embeds
-- Stateless content source mode for GitHub README project pages
-- React Query for data loading
-- Lightweight SVG knowledge graph, no heavy graph canvas dependency
-- Social share fallback dialog, share-event tracking, API-code database config, and queued auto-share jobs
+It includes a public portfolio, blog, project showcase, lightweight knowledge graph, protected admin CMS, project README import, blog Markdown import, searchable categories, and server-side social auto-share webhooks.
 
-## Install
+## Stack
 
-```bash
-npm install
-```
+- Next.js App Router
+- React 19
+- Tailwind CSS 4
+- Supabase Auth, Postgres, Storage
+- TanStack Query for admin CMS data
+- Server-side API routes for webhooks / social share processing
 
 ## Environment
 
-Create `.env` from `.env.example`:
-
-```bash
-cp .env.example .env
-```
-
-Fill it:
+Create `.env.local`:
 
 ```env
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
-VITE_SITE_URL=http://localhost:5173
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+SOCIAL_SHARE_WEBHOOK_SECRET=change-this-secret
 ```
 
-## Supabase setup
-
-1. Open Supabase SQL Editor.
-2. Run `supabase/schema.sql`.
-3. Optional: run `supabase/seed.sql` to add starter content.
-4. Confirm a public Storage bucket named `portfolio-media` exists. The schema creates it automatically on Supabase.
-5. Go to **Authentication → Users → Add user**.
-6. Create your admin email and password.
-7. Run the app and open `/login`.
+`SUPABASE_SERVICE_ROLE_KEY` is server-only. Do not expose it to the browser.
 
 ## Run locally
 
 ```bash
+npm install
 npm run dev
 ```
 
-Open:
+Open `http://localhost:3000`.
 
-- `/` public home
-- `/blog` public posts
-- `/projects` public projects
-- `/graph` knowledge graph
-- `/login` admin login
-- `/admin` protected dashboard
+## Database
 
-## Build
+Run `supabase/schema.sql`, then optionally run `supabase/seed.sql`.
 
-```bash
-npm run build
-```
+Main CMS tables:
 
-## Admin notes
+- `blog_posts`
+- `projects`
+- `categories`
+- `blog_post_categories`
+- `project_categories`
+- `site_settings`
+- `social_api_connections`
+- `social_share_settings`
+- `social_share_queue`
+- `share_events`
 
-The dashboard now works as a small CMS. It supports creating, editing, and deleting:
+Categories are reused by slug. When you save a blog/project and type a category that does not exist, the CMS creates it. If it exists, the same row is reused.
 
-- Blog posts
-- Projects
-- Searchable categories created from blog/project input
-- Homepage hero/site copy
-- Share settings
+## Content import rules
 
-Blog posts and projects also support:
+### Project
 
-- Draft/published status
-- Featured flag
-- Sort order
-- Automatic clean slug generation with manual override
-- Automatic SEO title and description generated from CMS title, excerpt/summary, and rich content
-- Category search/assignment with automatic create-or-reuse behavior
-- Cover image upload with browser-side compression before Supabase Storage upload
-- Rich CMS content input with write/preview mode
-- Bold, italic, links, headings, lists, quotes, code blocks, and horizontal rules
-- Inline compressed image upload into the article body
-- YouTube embeds using `::youtube https://youtu.be/video_id`
-- Audio embeds using `::audio https://example.com/audio.mp3`
-- Project README import from a GitHub repository URL
-- Blog Markdown import from a local `.md` / `.markdown` file
-- Stateless source mode: project GitHub README content can be refreshed at public page load while stored CMS content remains the fallback
+Projects can import README content from a GitHub repository URL or README URL, for example:
 
-Images are compressed in the browser to WebP/JPEG and uploaded to the public Supabase Storage bucket named `portfolio-media`. Run `supabase/schema.sql` again if you are upgrading an older project so the bucket and storage policies are created.
+- `https://github.com/rivando-al-rasyid/portfolio-supabase`
+- `https://github.com/rivando-al-rasyid/portfolio-supabase/blob/main/README.md`
 
-## CMS content syntax
+Projects can also import a local `.md` / `.markdown` file.
 
-The dashboard content editor stores safe Markdown-style text in the existing `content` column, so no extra rich-text dependency is required. Supported examples:
+### Blog
+
+Blog import uses only a local `.md` / `.markdown` file. README import is intentionally project-only.
+
+Supported frontmatter example:
 
 ```md
-## Heading
+---
+title: My Project
+excerpt: Short summary
+categories: [Next.js, Supabase]
+cover_image: https://example.com/cover.png
+repo_url: https://github.com/user/repo
+demo_url: https://example.com
+status: published
+featured: true
+sort_order: 10
+---
 
-Paragraph with **bold text**, *italic text*, and [a link](https://example.com).
-
-![Screenshot alt text](https://example.com/screenshot.webp)
-
-::youtube https://youtu.be/dQw4w9WgXcQ
-
-::audio https://example.com/audio.mp3
-
-- Bullet item
-- Another item
-
-> Quote text
+# Content here
 ```
 
-The public blog/project detail pages render that input as polished CMS output with responsive images, safe YouTube iframes, and native audio controls.
+## Auto-share webhooks
 
+The browser does not post directly to social APIs. Publishing content creates queue rows. Server-side Next.js API routes process the queue.
 
-## Stateless CMS source mode
+Endpoints:
 
-The admin form keeps README import project-only:
+- `POST /api/webhooks/social-share` — process queued jobs.
+- `POST /api/webhooks/content-published` — optional endpoint for external publish events to enqueue jobs.
 
-- `Manual CMS content` stores and renders the `content` column from Supabase.
-- `GitHub README` is for projects only. Paste a GitHub repository URL or README URL, click **Import README**, then save. Example: `https://github.com/rivando-al-rasyid/portfolio-supabase` or `https://github.com/rivando-al-rasyid/portfolio-supabase/blob/main/README.md`.
-- Blog posts do not use GitHub README import. Use **Import blog .md file** to fill blog inputs from a local `.md` / `.markdown` file.
-
-File imports are stored as normal manual CMS content because a browser-selected local file cannot be fetched again by public visitors.
-
-When upgrading an existing Supabase database, run `supabase/schema.sql` again so these columns are added:
-
-```sql
-content_source text not null default 'manual'
-source_url text
-```
-
-## Automatic SEO
-
-Blog posts and projects no longer require manual SEO fields. The admin form shows an **Automatic SEO preview** and saves:
-
-- `meta_title` from the content title, trimmed for search/social previews
-- `meta_description` from the excerpt/summary first, then the rich CMS body as a fallback
-
-The public detail pages also generate a fallback SEO description from the CMS content if older rows do not have metadata yet.
-
-## Auto-share requirements
-
-The CMS can queue auto-share jobs when new blog posts or projects are published. API code/token data is stored in `social_api_connections`, and queued jobs are stored in `social_share_queue`. Real posting should be processed by the included Supabase Edge Function or your own backend worker. Read:
-
-```txt
-docs/social-auto-share-requirements.md
-```
-
-Do not put social API secrets in `VITE_` frontend environment variables. The dashboard can save database API config for admin use, but posting should happen from `supabase/functions/process-social-share`, a backend server, or an automation service such as n8n/Zapier/Make.
-
-## Security note
-
-The frontend route guard protects `/admin`, but the real protection is in Supabase Row Level Security. The included schema allows:
-
-- public read for published content
-- authenticated write access for admin operations
-- public insert for share analytics
-
-For production, consider restricting admin writes to a specific allowlisted user ID or custom role claim instead of every authenticated user.
-
-## Folder structure
-
-```txt
-src/
-  components/
-    ui/                 shadcn-style components
-  features/
-    admin/              protected dashboard, category input, auto-share API settings
-    auth/               Supabase auth provider, login, route guard
-    blog/               list/detail pages
-    graph/              SVG knowledge graph
-    home/               landing page
-    projects/           list/detail pages
-    seo/                Open Graph/Twitter metadata
-    share/              share dialog and tracking
-  hooks/                React Query hooks
-  lib/                  Supabase, content service, media upload, image compression, utilities
-  types/                content models
-supabase/
-  schema.sql            tables, RLS policies, storage bucket, storage policies
-  seed.sql
-```
-
-## NPM registry fix
-
-This project includes a `.npmrc` file that forces npm to use the public npm registry:
+Example:
 
 ```bash
-npm config set registry https://registry.npmjs.org/
-npm install
+curl -X POST https://your-domain.com/api/webhooks/social-share \
+  -H "content-type: application/json" \
+  -H "x-webhook-secret: change-this-secret" \
+  -d '{"limit":10}'
 ```
+
+Read `docs/social-auto-share-requirements.md` for details.

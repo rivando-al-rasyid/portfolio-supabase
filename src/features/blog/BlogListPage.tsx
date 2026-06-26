@@ -1,32 +1,21 @@
-import { useLoaderData } from 'react-router-dom';
 import { ContentCard } from '../../components/ContentCard';
 import { EmptyState } from '../../components/EmptyState';
-import type { BlogListLoaderData } from '../../routes/loaders/contentLoaders';
-import { SEO } from '../seo/SEO';
+import type { BlogPost } from '../../types/content';
 
-export function BlogListPage() {
-  const { posts } = useLoaderData() as BlogListLoaderData;
-
+export function BlogListPage({ posts }: { posts: BlogPost[] }) {
   return (
-    <>
-      <SEO title="Blog" description="Posts about web development, portfolio systems, and product engineering." path="/blog" />
-      <section className="mx-auto max-w-6xl px-4 py-10">
-        <div className="mb-8 max-w-2xl">
-          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-primary">Blog</p>
-          <h1 className="mt-3 text-3xl font-bold tracking-tight md:text-5xl">Notes, decisions, and build logs.</h1>
-          <p className="mt-4 text-muted-foreground">Write public articles from the admin dashboard and connect them to categories automatically.</p>
-        </div>
+    <section className="mx-auto max-w-6xl px-4 py-10">
+      <div className="mb-8 max-w-2xl">
+        <p className="text-sm font-semibold uppercase tracking-[0.25em] text-primary">Blog</p>
+        <h1 className="mt-3 text-3xl font-bold tracking-tight md:text-5xl">Notes, decisions, and build logs.</h1>
+        <p className="mt-4 text-muted-foreground">Write public articles from the admin dashboard and connect them to categories automatically.</p>
+      </div>
 
-        {posts.length === 0 ? (
-          <EmptyState title="No posts yet" description="Publish a blog post from /admin after creating your Supabase user and running the schema." />
-        ) : null}
+      {posts.length === 0 ? <EmptyState title="No posts yet" description="Publish a blog post from /admin after creating your Supabase user and running the schema." /> : null}
 
-        <div className="grid gap-5 md:grid-cols-2">
-          {posts.map((post) => (
-            <ContentCard key={post.id} item={post} type="blog" />
-          ))}
-        </div>
-      </section>
-    </>
+      <div className="grid gap-5 md:grid-cols-2">
+        {posts.map((post) => <ContentCard key={post.id} item={post} type="blog" />)}
+      </div>
+    </section>
   );
 }

@@ -97,7 +97,7 @@ end $$;
 create table if not exists site_settings (
   id text primary key default 'default',
   site_name text not null default 'Portfolio Knowledge Graph',
-  hero_badge text not null default 'React + Tailwind 4 + Supabase',
+  hero_badge text not null default 'Next.js + Tailwind 4 + Supabase',
   hero_title text not null default 'Portfolio that works like a knowledge graph.',
   hero_description text not null default 'Publish posts, projects, and categories from a protected CMS dashboard. Then connect them through automatic relations and share-ready SEO metadata.',
   primary_cta_label text not null default 'View projects',

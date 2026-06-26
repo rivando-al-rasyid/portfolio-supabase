@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import Link from 'next/link';
 import { ArrowUpRight } from 'lucide-react';
 import { Badge } from './ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
@@ -18,7 +18,8 @@ export function ContentCard({ item, type }: ContentCardProps) {
   return (
     <Card className="group flex h-full flex-col overflow-hidden transition hover:-translate-y-1 hover:shadow-lg">
       {imageUrl ? (
-        <Link to={href} className="block overflow-hidden border-b bg-muted">
+        <Link href={href} className="block overflow-hidden border-b bg-muted">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={imageUrl} alt={item.title} loading="lazy" className="h-48 w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
         </Link>
       ) : null}
@@ -28,7 +29,7 @@ export function ContentCard({ item, type }: ContentCardProps) {
           <span className="text-xs text-muted-foreground">{formatDate('published_at' in item ? item.published_at : item.updated_at)}</span>
         </div>
         <CardTitle className="text-xl leading-tight">
-          <Link to={href} className="hover:underline">
+          <Link href={href} className="hover:underline">
             {item.title}
           </Link>
         </CardTitle>
@@ -42,7 +43,7 @@ export function ContentCard({ item, type }: ContentCardProps) {
             </Badge>
           ))}
         </div>
-        <Link to={href} className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+        <Link href={href} className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
           Read more <ArrowUpRight className="h-4 w-4" />
         </Link>
       </CardContent>

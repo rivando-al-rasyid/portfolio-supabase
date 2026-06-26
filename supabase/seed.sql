@@ -12,7 +12,7 @@ insert into site_settings (
 values (
   'default',
   'Portfolio Knowledge Graph',
-  'React + Tailwind 4 + Supabase',
+  'Next.js + Tailwind 4 + Supabase',
   'Portfolio that works like a knowledge graph.',
   'Publish posts, projects, and categories from a protected CMS dashboard. Then connect them through automatic relations and share-ready SEO metadata.',
   'View projects',
