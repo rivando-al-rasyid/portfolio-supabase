@@ -1,21 +1,20 @@
-# Patch: Next.js auto-share sender
+# Next.js auto-share update
 
-Copy these files into the root of your existing Next.js portfolio project.
+This version supports only the requested production auto-share platforms:
 
-Changes included:
+- Facebook Page
+- Instagram
+- LinkedIn
+- X
 
-- Removes the dashboard input for external webhook/posting endpoint.
-- Removes `api_base_url` from the CMS form, TypeScript type, and upsert payload.
-- Adds a schema drop line for old `social_api_connections.api_base_url`.
-- Makes `/api/webhooks/social-share` the server-side sender.
-- Adds built-in server adapters for Telegram, X, Facebook Page, LinkedIn UGC posts, WhatsApp Cloud API, and Resend email.
-- Updates the auto-share docs and `.env.example`.
+The dashboard no longer asks for a webhook URL. The Next.js route `/api/webhooks/social-share` is the sender. It reads jobs from `social_share_queue`, loads the matching platform credential from `social_api_connections`, and posts server-side.
 
-After copying, run:
+Important changes:
 
-```bash
-npm install
-npm run build
-```
-
-Then run the updated `supabase/schema.sql` in Supabase so the old `api_base_url` column is removed.
+- Removed Telegram, WhatsApp, and Email from auto-share settings.
+- Added Instagram Graph API Content Publishing adapter.
+- Updated X sender to use `https://api.x.com/2/tweets`.
+- Facebook sender uses Meta Page feed posts.
+- LinkedIn sender uses UGC Posts API with `X-Restli-Protocol-Version: 2.0.0`.
+- Instagram requires a public image URL from the blog cover image or project image.
+- `.env.example` includes Supabase URL, publishable key, service role placeholder, webhook secret, and Meta Graph API version.

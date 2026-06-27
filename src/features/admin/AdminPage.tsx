@@ -90,24 +90,20 @@ const emptyEditor: EditorState = {
   categoryNames: []
 };
 
-const platforms: SharePlatform[] = ['linkedin', 'x', 'facebook', 'whatsapp', 'telegram', 'email'];
+const platforms: SharePlatform[] = ['facebook', 'instagram', 'linkedin', 'x'];
 
 const platformLabels: Record<SharePlatform, string> = {
+  facebook: 'Facebook Page',
+  instagram: 'Instagram',
   linkedin: 'LinkedIn',
-  x: 'X / Twitter',
-  facebook: 'Facebook',
-  whatsapp: 'WhatsApp',
-  telegram: 'Telegram',
-  email: 'Email'
+  x: 'X'
 };
 
 const platformDescriptions: Record<SharePlatform, string> = {
-  linkedin: 'Next.js posts with the LinkedIn API. Use an access token with posting permission and an author URN such as urn:li:person:... or urn:li:organization:...',
-  x: 'Next.js posts with the X API v2 tweet endpoint. Use a user access token with tweet.write permission.',
-  facebook: 'Next.js posts with the Meta Graph Page feed endpoint. Use a Page ID and Page access token.',
-  whatsapp: 'Next.js posts with the WhatsApp Cloud API. Use phone number ID, recipient number, and a Meta access token.',
-  telegram: 'Next.js posts directly with Telegram Bot API. Use bot token and chat ID.',
-  email: 'Next.js sends through Resend. Use a Resend API key and recipient email address.'
+  facebook: 'Posts to a Facebook Page through the Meta Pages API. Required: Page ID and Page access token with Pages publishing permissions.',
+  instagram: 'Publishes an image post through Instagram Graph API Content Publishing. Required: Instagram Business IG User ID, access token, and a public image URL on the blog/project.',
+  linkedin: 'Creates a LinkedIn member share through the UGC Posts API. Required: LinkedIn Person URN and OAuth access token with w_member_social scope.',
+  x: 'Creates a post through X API v2. Required: OAuth user access token with tweet.write permission.'
 };
 
 function getPlatformLabel(platform: SharePlatform) {
@@ -115,47 +111,36 @@ function getPlatformLabel(platform: SharePlatform) {
 }
 
 function getDestinationLabel(platform: SharePlatform) {
-  if (platform === 'telegram') return 'Telegram chat ID';
-  if (platform === 'linkedin') return 'LinkedIn author URN';
   if (platform === 'facebook') return 'Facebook Page ID';
-  if (platform === 'whatsapp') return 'WhatsApp phone number ID';
-  if (platform === 'email') return 'Recipient email';
-  return 'Account / destination ID';
+  if (platform === 'instagram') return 'Instagram Business IG User ID';
+  if (platform === 'linkedin') return 'LinkedIn Person URN';
+  return 'X account ID';
 }
 
 function getDestinationPlaceholder(platform: SharePlatform) {
-  if (platform === 'telegram') return 'Example: 123456789 or -1001234567890';
-  if (platform === 'linkedin') return 'Example: urn:li:person:abc123 or urn:li:organization:12345';
   if (platform === 'facebook') return 'Example: 123456789012345';
-  if (platform === 'whatsapp') return 'Example: WhatsApp phone number ID from Meta';
-  if (platform === 'email') return 'Example: you@example.com';
-  return 'Only required when the platform API needs it';
-}
-
-function getApiCodeLabel(platform: SharePlatform) {
-  if (platform === 'email') return 'From email';
-  if (platform === 'whatsapp') return 'Recipient number';
-  return 'API code';
-}
-
-function getApiCodePlaceholder(platform: SharePlatform) {
-  if (platform === 'email') return 'Example: Portfolio <hello@example.com>';
-  if (platform === 'whatsapp') return 'Example: 6281234567890';
-  return 'Optional platform code, if required';
+  if (platform === 'instagram') return 'Example: 17841400000000000';
+  if (platform === 'linkedin') return 'Example: urn:li:person:abc123';
+  return 'Optional. The OAuth user token decides the posting account.';
 }
 
 function getTokenLabel(platform: SharePlatform) {
-  if (platform === 'telegram') return 'Bot token';
-  if (platform === 'email') return 'Resend API key';
-  return 'Access token';
+  if (platform === 'facebook') return 'Facebook Page access token';
+  if (platform === 'instagram') return 'Instagram Graph API access token';
+  if (platform === 'linkedin') return 'LinkedIn OAuth access token';
+  return 'X OAuth user access token';
 }
 
 function getTokenPlaceholder(platform: SharePlatform) {
-  if (platform === 'telegram') return 'Telegram bot token';
-  if (platform === 'email') return 're_...';
-  return 'Platform access token with posting permission';
+  if (platform === 'facebook') return 'Page token with pages_manage_posts permission';
+  if (platform === 'instagram') return 'Token with Instagram content publishing permission';
+  if (platform === 'linkedin') return 'Token with w_member_social scope';
+  return 'Token with tweet.write scope';
 }
 
+function isDestinationRequired(platform: SharePlatform) {
+  return platform !== 'x';
+}
 
 const emptyApiEditor: ApiConnectionEditorState = {
   platform: 'linkedin',
@@ -421,7 +406,8 @@ export function AdminPage() {
               description: generateSeoDescription({ description: saved.excerpt, content: saved.content }),
               url: getCanonicalUrl(`/blog/${saved.slug}`),
               type: 'blog',
-              categories: savedCategories.map((category) => category.name)
+              categories: savedCategories.map((category) => category.name),
+              image_url: saved.cover_image
             }
           });
         }
@@ -458,7 +444,8 @@ export function AdminPage() {
             description: generateSeoDescription({ description: saved.summary, content: saved.content }),
             url: getCanonicalUrl(`/projects/${saved.slug}`),
             type: 'project',
-            categories: savedCategories.map((category) => category.name)
+            categories: savedCategories.map((category) => category.name),
+            image_url: saved.image_url
           }
         });
       }
@@ -519,9 +506,9 @@ export function AdminPage() {
         platform: state.platform,
         label: state.label || null,
         is_enabled: state.isEnabled,
-        api_code: state.apiCode || null,
+        api_code: null,
         api_token: state.apiToken || null,
-        api_secret: state.apiSecret || null,
+        api_secret: null,
         account_id: state.accountId || null,
         extra_config: {}
       });
@@ -1152,7 +1139,7 @@ export function AdminPage() {
                   <Alert>
                     <AlertTitle>How sending works</AlertTitle>
                     <AlertDescription>
-                      Call <code>/api/webhooks/social-share</code> from Vercel Cron, Supabase Scheduled Functions, or another server-side scheduler. The dashboard does not need a webhook URL input because this Next.js route is the sender.
+                      Call <code>/api/webhooks/social-share</code> from Vercel Cron or another server-side scheduler. This Next.js route reads the queue and posts directly to Facebook, Instagram, LinkedIn, and X using the saved credentials.
                     </AlertDescription>
                   </Alert>
                 </CardContent>
@@ -1164,7 +1151,7 @@ export function AdminPage() {
                 <CardHeader>
                   <CardTitle>Platform connection</CardTitle>
                   <CardDescription>
-                    Save one reusable credential set per platform. The posting endpoint is generated by Next.js, so you only store the destination ID and tokens needed by each platform.
+                    Save one reusable credential set per supported platform: Facebook Page, Instagram, LinkedIn, and X. The posting endpoint is generated by Next.js, so you only store the destination ID and access token.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1195,35 +1182,25 @@ export function AdminPage() {
 
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Connection label</label>
-                      <Input value={apiEditor.label} onChange={(event) => setApiEditor({ ...apiEditor, label: event.target.value })} placeholder="Personal LinkedIn, portfolio Telegram, etc." />
+                      <Input value={apiEditor.label} onChange={(event) => setApiEditor({ ...apiEditor, label: event.target.value })} placeholder="Portfolio Facebook Page, Personal LinkedIn, Project X account, etc." />
                     </div>
 
                     <Alert>
                       <AlertTitle>Endpoint is handled by Next.js</AlertTitle>
                       <AlertDescription>
-                        You do not need to paste a webhook URL. The scheduler calls <code>/api/webhooks/social-share</code>, then this app chooses the correct platform API endpoint on the server.
+                        You do not need to paste a webhook URL. The scheduler calls <code>/api/webhooks/social-share</code>, then this app posts to the official platform API from the server.
                       </AlertDescription>
                     </Alert>
 
                     <div className="space-y-2">
                       <label className="text-sm font-medium">{getDestinationLabel(apiEditor.platform)}</label>
-                      <Input value={apiEditor.accountId} onChange={(event) => setApiEditor({ ...apiEditor, accountId: event.target.value })} placeholder={getDestinationPlaceholder(apiEditor.platform)} />
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">{getApiCodeLabel(apiEditor.platform)}</label>
-                        <Input type="password" value={apiEditor.apiCode} onChange={(event) => setApiEditor({ ...apiEditor, apiCode: event.target.value })} placeholder={getApiCodePlaceholder(apiEditor.platform)} />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">{getTokenLabel(apiEditor.platform)}</label>
-                        <Input type="password" value={apiEditor.apiToken} onChange={(event) => setApiEditor({ ...apiEditor, apiToken: event.target.value })} placeholder={getTokenPlaceholder(apiEditor.platform)} />
-                      </div>
+                      <Input value={apiEditor.accountId} onChange={(event) => setApiEditor({ ...apiEditor, accountId: event.target.value })} placeholder={getDestinationPlaceholder(apiEditor.platform)} required={isDestinationRequired(apiEditor.platform)} />
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-sm font-medium">Secret / signing key</label>
-                      <Input type="password" value={apiEditor.apiSecret} onChange={(event) => setApiEditor({ ...apiEditor, apiSecret: event.target.value })} placeholder="Optional signing key / client secret if your platform flow needs it" />
+                      <label className="text-sm font-medium">{getTokenLabel(apiEditor.platform)}</label>
+                      <Input type="password" value={apiEditor.apiToken} onChange={(event) => setApiEditor({ ...apiEditor, apiToken: event.target.value })} placeholder={getTokenPlaceholder(apiEditor.platform)} />
+                      <p className="text-xs text-muted-foreground">Tokens are stored in Supabase and only used by the Next.js server route. Do not call social APIs from the browser.</p>
                     </div>
 
                     <Button type="submit" disabled={apiConnectionMutation.isPending}>

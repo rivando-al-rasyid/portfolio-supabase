@@ -17,7 +17,12 @@ exception when duplicate_object then null;
 end $$;
 
 do $$ begin
-  create type share_platform as enum ('linkedin', 'x', 'facebook', 'whatsapp', 'telegram', 'email');
+  create type share_platform as enum ('facebook', 'instagram', 'linkedin', 'x');
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  alter type share_platform add value if not exists 'instagram';
 exception when duplicate_object then null;
 end $$;
 
@@ -149,7 +154,7 @@ alter table categories drop column if exists description;
 create table if not exists social_share_settings (
   id text primary key default 'default',
   auto_share_on_publish boolean not null default true,
-  active_platforms share_platform[] not null default array['linkedin','x','facebook','whatsapp','telegram','email']::share_platform[],
+  active_platforms share_platform[] not null default array['facebook','instagram','linkedin','x']::share_platform[],
   default_message_template text not null default 'New {{type}}: {{title}} {{url}}',
   updated_at timestamptz not null default now()
 );
@@ -217,6 +222,29 @@ create index if not exists idx_share_events_entity on share_events(entity_type, 
 create index if not exists idx_social_api_platform on social_api_connections(platform);
 
 alter table social_api_connections drop column if exists api_base_url;
+
+-- Limit auto-share to the four supported production platforms.
+delete from social_api_connections where platform not in ('facebook', 'instagram', 'linkedin', 'x');
+delete from social_share_queue where platform not in ('facebook', 'instagram', 'linkedin', 'x');
+update social_share_settings
+set active_platforms = array['facebook','instagram','linkedin','x']::share_platform[],
+    updated_at = now()
+where id = 'default';
+
+alter table social_api_connections drop constraint if exists social_api_connections_platform_supported;
+alter table social_api_connections
+  add constraint social_api_connections_platform_supported
+  check (platform = any (array['facebook','instagram','linkedin','x']::share_platform[]));
+
+alter table social_share_queue drop constraint if exists social_share_queue_platform_supported;
+alter table social_share_queue
+  add constraint social_share_queue_platform_supported
+  check (platform = any (array['facebook','instagram','linkedin','x']::share_platform[]));
+
+alter table social_share_settings drop constraint if exists social_share_settings_active_platforms_supported;
+alter table social_share_settings
+  add constraint social_share_settings_active_platforms_supported
+  check (active_platforms <@ array['facebook','instagram','linkedin','x']::share_platform[]);
 
 alter table blog_posts enable row level security;
 alter table projects enable row level security;
@@ -324,5 +352,5 @@ values ('default')
 on conflict (id) do nothing;
 
 insert into social_share_settings (id, auto_share_on_publish, active_platforms, default_message_template)
-values ('default', true, array['linkedin','x','facebook','whatsapp','telegram','email']::share_platform[], 'New {{type}}: {{title}} {{url}}')
+values ('default', true, array['facebook','instagram','linkedin','x']::share_platform[], 'New {{type}}: {{title}} {{url}}')
 on conflict (id) do nothing;

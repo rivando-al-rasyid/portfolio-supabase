@@ -8,7 +8,7 @@ import { buildShareUrl } from '../../lib/share';
 import { trackShareEvent } from '../../lib/contentService';
 import type { EntityType, SharePlatform } from '../../types/content';
 
-const platforms: SharePlatform[] = ['linkedin', 'x', 'facebook', 'whatsapp', 'telegram', 'email'];
+const platforms: Exclude<SharePlatform, 'instagram'>[] = ['linkedin', 'x', 'facebook'];
 
 interface ShareButtonProps {
   entityType: Extract<EntityType, 'blog' | 'project'>;

@@ -1,7 +1,7 @@
 export type PublishStatus = 'draft' | 'published';
 export type ContentSource = 'manual' | 'github_readme' | 'markdown_url';
 export type EntityType = 'blog' | 'project' | 'category';
-export type SharePlatform = 'linkedin' | 'x' | 'facebook' | 'whatsapp' | 'telegram' | 'email';
+export type SharePlatform = 'facebook' | 'instagram' | 'linkedin' | 'x';
 export type ShareStatus = 'pending' | 'ready' | 'sent' | 'failed';
 
 export interface Category {

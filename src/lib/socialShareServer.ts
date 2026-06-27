@@ -1,10 +1,14 @@
 import { createServiceClient } from './supabase-server';
-import { getSiteUrl } from './utils';
+import { getSiteUrl, truncateText } from './utils';
 import type { SharePlatform, SocialApiConnection, SocialShareQueueItem } from '../types/content';
 
 interface ProcessOptions {
   limit?: number;
 }
+
+const SUPPORTED_AUTO_SHARE_PLATFORMS: SharePlatform[] = ['facebook', 'instagram', 'linkedin', 'x'];
+const META_GRAPH_VERSION = process.env.SOCIAL_SHARE_META_GRAPH_VERSION || 'v22.0';
+const META_GRAPH_BASE_URL = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
@@ -34,73 +38,151 @@ function requireValue(value: string | null | undefined, label: string) {
   return value.trim();
 }
 
-async function postTelegram(connection: SocialApiConnection, message: string) {
-  const botToken = requireValue(connection.api_token, 'Telegram bot token');
-  const chatId = requireValue(connection.account_id, 'Telegram chat ID');
+function getPayloadText(item: SocialShareQueueItem, key: string) {
+  const payload = asRecord(item.payload);
+  return String(payload[key] ?? '').trim();
+}
 
-  const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: message,
-      disable_web_page_preview: false
-    })
-  });
-
-  if (!response.ok) throw new Error(`Telegram returned ${await readError(response)}`);
+function appendUrl(message: string, url: string) {
+  if (!url) return message;
+  if (message.includes(url)) return message;
+  return `${message}\n\n${url}`.trim();
 }
 
 async function postX(connection: SocialApiConnection, message: string) {
-  const token = requireValue(connection.api_token, 'X access token');
-  const response = await fetch('https://api.twitter.com/2/tweets', {
+  const token = requireValue(connection.api_token, 'X user access token with tweet.write scope');
+
+  const response = await fetch('https://api.x.com/2/tweets', {
     method: 'POST',
     headers: {
       authorization: `Bearer ${token}`,
       'content-type': 'application/json'
     },
-    body: JSON.stringify({ text: message.slice(0, 280) })
+    body: JSON.stringify({ text: truncateText(message, 280) })
   });
 
   if (!response.ok) throw new Error(`X returned ${await readError(response)}`);
 }
 
-async function postFacebook(connection: SocialApiConnection, message: string) {
+async function postFacebook(connection: SocialApiConnection, item: SocialShareQueueItem, message: string) {
   const pageId = requireValue(connection.account_id, 'Facebook Page ID');
   const token = requireValue(connection.api_token, 'Facebook Page access token');
-  const form = new URLSearchParams({ message, access_token: token });
+  const url = getPayloadText(item, 'url');
 
-  const response = await fetch(`https://graph.facebook.com/v19.0/${pageId}/feed`, {
+  const body: Record<string, string | boolean> = {
+    message,
+    published: true
+  };
+  if (url) body.link = url;
+
+  const response = await fetch(`${META_GRAPH_BASE_URL}/${pageId}/feed`, {
     method: 'POST',
-    body: form
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(body)
   });
 
   if (!response.ok) throw new Error(`Facebook returned ${await readError(response)}`);
 }
 
+async function postInstagram(connection: SocialApiConnection, item: SocialShareQueueItem, message: string) {
+  const igUserId = requireValue(connection.account_id, 'Instagram Business IG User ID');
+  const token = requireValue(connection.api_token, 'Instagram Graph API access token');
+  const imageUrl = getPayloadText(item, 'image_url') || getPayloadText(item, 'cover_image');
+  const contentUrl = getPayloadText(item, 'url');
+
+  if (!imageUrl) {
+    throw new Error('Instagram publishing needs a public image URL. Add a blog cover image or project image before publishing.');
+  }
+
+  const caption = truncateText(appendUrl(message, contentUrl), 2200);
+
+  const createContainerResponse = await fetch(`${META_GRAPH_BASE_URL}/${igUserId}/media`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      image_url: imageUrl,
+      caption
+    })
+  });
+
+  if (!createContainerResponse.ok) {
+    throw new Error(`Instagram media container returned ${await readError(createContainerResponse)}`);
+  }
+
+  const container = (await createContainerResponse.json()) as { id?: string };
+  const creationId = requireValue(container.id, 'Instagram media container ID');
+
+  await waitForInstagramContainer(creationId, token);
+
+  const publishResponse = await fetch(`${META_GRAPH_BASE_URL}/${igUserId}/media_publish`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({ creation_id: creationId })
+  });
+
+  if (!publishResponse.ok) {
+    throw new Error(`Instagram media publish returned ${await readError(publishResponse)}`);
+  }
+}
+
+async function waitForInstagramContainer(containerId: string, token: string) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const response = await fetch(`${META_GRAPH_BASE_URL}/${containerId}?fields=status_code`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Instagram container status returned ${await readError(response)}`);
+    }
+
+    const body = (await response.json()) as { status_code?: string };
+    if (body.status_code === 'FINISHED') return;
+    if (body.status_code === 'ERROR' || body.status_code === 'EXPIRED') {
+      throw new Error(`Instagram container is ${body.status_code}.`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+}
+
 async function postLinkedIn(connection: SocialApiConnection, item: SocialShareQueueItem, message: string) {
-  const author = requireValue(connection.account_id, 'LinkedIn author URN');
-  const token = requireValue(connection.api_token, 'LinkedIn access token');
+  const author = requireValue(connection.account_id, 'LinkedIn Person URN');
+  const token = requireValue(connection.api_token, 'LinkedIn access token with w_member_social scope');
   const payload = asRecord(item.payload);
-  const url = String(payload.url ?? '');
+  const url = String(payload.url ?? '').trim();
+  const title = String(payload.title ?? 'New post');
+  const description = String(payload.description ?? '');
+
+  const shareContent: Record<string, unknown> = {
+    shareCommentary: { text: message },
+    shareMediaCategory: url ? 'ARTICLE' : 'NONE'
+  };
+
+  if (url) {
+    shareContent.media = [
+      {
+        status: 'READY',
+        originalUrl: url,
+        title: { text: title },
+        ...(description ? { description: { text: description } } : {})
+      }
+    ];
+  }
 
   const body = {
     author,
     lifecycleState: 'PUBLISHED',
     specificContent: {
-      'com.linkedin.ugc.ShareContent': {
-        shareCommentary: { text: message },
-        shareMediaCategory: url ? 'ARTICLE' : 'NONE',
-        media: url
-          ? [
-              {
-                status: 'READY',
-                originalUrl: url,
-                title: { text: String(payload.title ?? 'New post') }
-              }
-            ]
-          : []
-      }
+      'com.linkedin.ugc.ShareContent': shareContent
     },
     visibility: {
       'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC'
@@ -120,64 +202,13 @@ async function postLinkedIn(connection: SocialApiConnection, item: SocialShareQu
   if (!response.ok) throw new Error(`LinkedIn returned ${await readError(response)}`);
 }
 
-async function postWhatsApp(connection: SocialApiConnection, message: string) {
-  const phoneNumberId = requireValue(connection.account_id, 'WhatsApp phone number ID');
-  const recipientNumber = requireValue(connection.api_code, 'WhatsApp recipient number');
-  const token = requireValue(connection.api_token, 'WhatsApp access token');
-
-  const response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      messaging_product: 'whatsapp',
-      to: recipientNumber,
-      type: 'text',
-      text: {
-        preview_url: true,
-        body: message
-      }
-    })
-  });
-
-  if (!response.ok) throw new Error(`WhatsApp returned ${await readError(response)}`);
-}
-
-async function postEmail(connection: SocialApiConnection, item: SocialShareQueueItem, message: string) {
-  const apiKey = requireValue(connection.api_token, 'Resend API key');
-  const to = requireValue(connection.account_id, 'recipient email');
-  const from = connection.api_code?.trim() || process.env.SOCIAL_SHARE_EMAIL_FROM || 'Portfolio <onboarding@resend.dev>';
-  const payload = asRecord(item.payload);
-  const subject = `New ${String(payload.type ?? 'content')}: ${String(payload.title ?? 'Portfolio update')}`;
-
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      from,
-      to,
-      subject,
-      text: message
-    })
-  });
-
-  if (!response.ok) throw new Error(`Email provider returned ${await readError(response)}`);
-}
-
 async function postToPlatform(connection: SocialApiConnection, item: SocialShareQueueItem, message: string) {
-  if (connection.platform === 'telegram') return postTelegram(connection, message);
-  if (connection.platform === 'x') return postX(connection, message);
-  if (connection.platform === 'facebook') return postFacebook(connection, message);
+  if (connection.platform === 'facebook') return postFacebook(connection, item, message);
+  if (connection.platform === 'instagram') return postInstagram(connection, item, message);
   if (connection.platform === 'linkedin') return postLinkedIn(connection, item, message);
-  if (connection.platform === 'whatsapp') return postWhatsApp(connection, message);
-  if (connection.platform === 'email') return postEmail(connection, item, message);
+  if (connection.platform === 'x') return postX(connection, message);
 
-  throw new Error(`Unsupported platform: ${connection.platform}`);
+  throw new Error(`Unsupported auto-share platform: ${connection.platform}`);
 }
 
 export async function processSocialShareQueue({ limit = 10 }: ProcessOptions = {}) {
@@ -190,6 +221,7 @@ export async function processSocialShareQueue({ limit = 10 }: ProcessOptions = {
   const { data: queue, error: queueError } = await supabase
     .from('social_share_queue')
     .select('*')
+    .in('platform', SUPPORTED_AUTO_SHARE_PLATFORMS)
     .in('status', ['pending', 'ready'])
     .lte('scheduled_at', new Date().toISOString())
     .order('created_at', { ascending: true })
@@ -259,9 +291,10 @@ function normalizePublishedPayload(body: Record<string, unknown>) {
   const description = String(record.excerpt ?? record.summary ?? body.description ?? '');
   const entityId = String(record.id ?? body.entity_id ?? body.id ?? '');
   const categories = Array.isArray(body.categories) ? body.categories : [];
+  const imageUrl = String(record.cover_image ?? record.image_url ?? body.image_url ?? body.cover_image ?? '');
   const url = String(body.url ?? `${getSiteUrl()}/${entityType === 'blog' ? 'blog' : 'projects'}/${slug}`);
 
-  return { entityType, entityId, title, description, slug, categories, url };
+  return { entityType, entityId, title, description, slug, categories, url, imageUrl };
 }
 
 export async function enqueuePublishedContent(body: Record<string, unknown>) {
@@ -280,7 +313,9 @@ export async function enqueuePublishedContent(body: Record<string, unknown>) {
   const { data: settings, error: settingsError } = await supabase.from('social_share_settings').select('*').eq('id', 'default').maybeSingle();
   if (settingsError) throw settingsError;
 
-  const platforms = ((settings?.active_platforms as SharePlatform[] | undefined) ?? []) as SharePlatform[];
+  const platforms = ((settings?.active_platforms as SharePlatform[] | undefined) ?? []).filter((platform) =>
+    SUPPORTED_AUTO_SHARE_PLATFORMS.includes(platform)
+  );
   if (!settings?.auto_share_on_publish || platforms.length === 0) {
     return { queued: 0, skipped: 'Auto-share is disabled or no platforms are active.' };
   }
@@ -294,6 +329,7 @@ export async function enqueuePublishedContent(body: Record<string, unknown>) {
       title: normalized.title,
       description: normalized.description,
       url: normalized.url,
+      image_url: normalized.imageUrl,
       type: normalized.entityType,
       categories: normalized.categories
     },

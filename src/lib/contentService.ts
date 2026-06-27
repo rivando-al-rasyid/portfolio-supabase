@@ -17,6 +17,8 @@ import type {
 const blogSelect = '*, blog_post_categories(categories(*))';
 const projectSelect = '*, project_categories(categories(*))';
 
+const supportedAutoSharePlatforms: SharePlatform[] = ['facebook', 'instagram', 'linkedin', 'x'];
+
 interface CategoryJoinRow {
   categories: Category | null;
 }
@@ -118,7 +120,11 @@ export async function getSiteSettings() {
 export async function updateSiteSettings(payload: Omit<SiteSettings, 'id' | 'updated_at'>) {
   const { data, error } = await supabase
     .from('site_settings')
-    .upsert({ id: 'default', ...payload, updated_at: new Date().toISOString() })
+    .upsert({
+      id: 'default',
+      ...payload,
+      updated_at: new Date().toISOString()
+    })
     .select('*')
     .single();
   if (error) throw error;
@@ -334,18 +340,26 @@ export async function getShareSettings() {
     return {
       id: 'default',
       auto_share_on_publish: true,
-      active_platforms: ['linkedin', 'x', 'facebook', 'whatsapp', 'telegram', 'email'] as SharePlatform[],
+      active_platforms: supportedAutoSharePlatforms,
       default_message_template: 'New {{type}}: {{title}} {{url}}',
       updated_at: new Date().toISOString()
     } satisfies ShareSettings;
   }
-  return data as ShareSettings;
+  return {
+    ...(data as ShareSettings),
+    active_platforms: ((data.active_platforms ?? []) as SharePlatform[]).filter((platform) => supportedAutoSharePlatforms.includes(platform))
+  } satisfies ShareSettings;
 }
 
 export async function updateShareSettings(payload: Pick<ShareSettings, 'auto_share_on_publish' | 'active_platforms' | 'default_message_template'>) {
   const { data, error } = await supabase
     .from('social_share_settings')
-    .upsert({ id: 'default', ...payload, updated_at: new Date().toISOString() })
+    .upsert({
+      id: 'default',
+      ...payload,
+      active_platforms: payload.active_platforms.filter((platform) => supportedAutoSharePlatforms.includes(platform)),
+      updated_at: new Date().toISOString()
+    })
     .select('*')
     .single();
   if (error) throw error;
@@ -392,8 +406,9 @@ export async function enqueueShareJobs(input: {
   platforms: SharePlatform[];
   payload: Record<string, unknown>;
 }) {
-  if (!input.platforms.length) return;
-  const rows = input.platforms.map((platform) => ({
+  const platforms = input.platforms.filter((platform) => supportedAutoSharePlatforms.includes(platform));
+  if (!platforms.length) return;
+  const rows = platforms.map((platform) => ({
     entity_type: input.entityType,
     entity_id: input.entityId,
     platform,
