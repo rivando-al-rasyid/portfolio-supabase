@@ -1,48 +1,90 @@
 # Social auto-share requirements
 
-Auto-share runs server-side through the Next.js route:
+Auto-share is processed by the Next.js server route, not by browser code.
+
+Run this endpoint from Vercel Cron, Supabase Scheduled Functions, GitHub Actions, or another scheduler:
 
 ```txt
 POST /api/webhooks/social-share
+Authorization: Bearer $SOCIAL_SHARE_WEBHOOK_SECRET
 ```
 
-The browser dashboard only saves platform credentials and creates queue rows. It does **not** call Facebook, Instagram, LinkedIn, or X directly.
+Supported destinations are intentionally limited to production-ready targets:
 
-## Supported platforms
+- Facebook Page
+- Instagram Business / Creator account
+- LinkedIn member profile
+- X account
 
-Only these platforms are supported by the production auto-share sender:
+## LinkedIn
 
-| Platform | Required destination | Required token | Posting behavior |
-| --- | --- | --- | --- |
-| Facebook Page | Facebook Page ID | Page access token with Pages publishing permissions | Creates a Page feed post with `message` and `link`. |
-| Instagram | Instagram Business IG User ID | Instagram Graph API access token with content publishing access | Creates an image media container from the blog/project image URL, waits briefly for it, then publishes it. |
-| LinkedIn | LinkedIn Person URN, for example `urn:li:person:...` | OAuth access token with `w_member_social` | Creates a LinkedIn UGC post. If a URL exists, it creates an article share. |
-| X | Optional account ID | OAuth user access token with `tweet.write` | Creates a post through X API v2. |
+LinkedIn should use OAuth, not a pasted Client Secret in the dashboard.
 
-## Important platform notes
+1. In LinkedIn Developer Portal, add this redirect URL:
 
-- Facebook posting uses the Meta Pages API. The Page token must belong to a user/app that can create content for that Page.
-- Instagram cannot publish text-only CMS items through this sender. Add a public blog cover image or project image before publishing if Instagram is selected.
-- LinkedIn self-serve member sharing expects a Person URN and `w_member_social` permission.
-- X posting requires a user access token, not an app-only bearer token.
+```txt
+https://your-domain.com/api/auth/linkedin/callback
+```
 
-## Environment variables
+For local development:
+
+```txt
+http://localhost:3000/api/auth/linkedin/callback
+```
+
+2. Add these server environment variables:
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=https://vvsuyntqnehrrrsnnlgo.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_6zFE4f7hcoejgByjC4Wqjw_pRZ3KQ7O
-NEXT_PUBLIC_SITE_URL=http://localhost:3000
-
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-SOCIAL_SHARE_WEBHOOK_SECRET=change-this-secret
-SOCIAL_SHARE_META_GRAPH_VERSION=v22.0
+LINKEDIN_CLIENT_ID=your-linkedin-client-id
+LINKEDIN_CLIENT_SECRET=your-linkedin-primary-client-secret
+LINKEDIN_REDIRECT_URI=https://your-domain.com/api/auth/linkedin/callback
 ```
 
-Use `SOCIAL_SHARE_WEBHOOK_SECRET` in your scheduler request:
+3. Make sure your LinkedIn app has permission to request:
 
-```bash
-curl -X POST "$NEXT_PUBLIC_SITE_URL/api/webhooks/social-share" \
-  -H "content-type: application/json" \
-  -H "x-webhook-secret: $SOCIAL_SHARE_WEBHOOK_SECRET" \
-  -d '{"limit":10}'
+```txt
+openid profile w_member_social
 ```
+
+4. In the Admin CMS Auto-share tab, select LinkedIn and click **Connect LinkedIn OAuth**.
+
+The callback route exchanges the authorization code server-side, reads the LinkedIn profile ID, then upserts the `linkedin` row in `social_api_connections` with:
+
+- `account_id`: `urn:li:person:<profile-id>`
+- `api_token`: LinkedIn OAuth access token
+- `extra_config.expires_at`: token expiry timestamp
+
+The auto-share processor posts LinkedIn text/article shares through the server adapter.
+
+## Facebook Page
+
+Save:
+
+- Facebook Page ID
+- Page access token with page publishing permission
+
+The sender posts to the Page feed with message text and optional link.
+
+## Instagram
+
+Save:
+
+- Instagram Business IG User ID
+- Instagram Graph API access token
+
+Instagram publishing requires a public image URL. Add a blog cover image or project image before publishing.
+
+## X
+
+Save:
+
+- OAuth user access token with post/write permission
+
+X posts are truncated to 280 characters.
+
+## Security notes
+
+- Do not expose platform access tokens in client-side code.
+- Do not put LinkedIn Client Secret in the dashboard UI.
+- Keep `SUPABASE_SERVICE_ROLE_KEY`, platform app secrets, and webhook secrets as server-only environment variables.
+- For production, set `NEXT_PUBLIC_SITE_URL` to your real domain so callback URLs and shared content URLs are correct.

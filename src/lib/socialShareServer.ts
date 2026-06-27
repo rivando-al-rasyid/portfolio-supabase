@@ -157,6 +157,12 @@ async function waitForInstagramContainer(containerId: string, token: string) {
 async function postLinkedIn(connection: SocialApiConnection, item: SocialShareQueueItem, message: string) {
   const author = requireValue(connection.account_id, 'LinkedIn Person URN');
   const token = requireValue(connection.api_token, 'LinkedIn access token with w_member_social scope');
+  const config = asRecord(connection.extra_config);
+  const expiresAt = config.expires_at ? Date.parse(String(config.expires_at)) : 0;
+  if (expiresAt && Date.now() > expiresAt - 60_000) {
+    throw new Error('LinkedIn access token expired. Reconnect LinkedIn from Auto-share settings.');
+  }
+
   const payload = asRecord(item.payload);
   const url = String(payload.url ?? '').trim();
   const title = String(payload.title ?? 'New post');

@@ -102,7 +102,7 @@ const platformLabels: Record<SharePlatform, string> = {
 const platformDescriptions: Record<SharePlatform, string> = {
   facebook: 'Posts to a Facebook Page through the Meta Pages API. Required: Page ID and Page access token with Pages publishing permissions.',
   instagram: 'Publishes an image post through Instagram Graph API Content Publishing. Required: Instagram Business IG User ID, access token, and a public image URL on the blog/project.',
-  linkedin: 'Creates a LinkedIn member share through the UGC Posts API. Required: LinkedIn Person URN and OAuth access token with w_member_social scope.',
+  linkedin: 'Connect with LinkedIn OAuth. Add LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET to your server env, then click Connect LinkedIn. The app saves the Person URN and access token server-side.',
   x: 'Creates a post through X API v2. Required: OAuth user access token with tweet.write permission.'
 };
 
@@ -1180,32 +1180,57 @@ export function AdminPage() {
                       <AlertDescription>{platformDescriptions[apiEditor.platform]}</AlertDescription>
                     </Alert>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Connection label</label>
-                      <Input value={apiEditor.label} onChange={(event) => setApiEditor({ ...apiEditor, label: event.target.value })} placeholder="Portfolio Facebook Page, Personal LinkedIn, Project X account, etc." />
-                    </div>
+                    {apiEditor.platform === 'linkedin' ? (
+                      <div className="space-y-4">
+                        <Alert>
+                          <AlertTitle>LinkedIn uses OAuth, not a pasted secret</AlertTitle>
+                          <AlertDescription>
+                            Put your Client ID and Primary Client Secret in the server environment. Then connect your LinkedIn account here. This app exchanges the authorization code on the server and stores only the posting token and Person URN in Supabase.
+                          </AlertDescription>
+                        </Alert>
 
-                    <Alert>
-                      <AlertTitle>Endpoint is handled by Next.js</AlertTitle>
-                      <AlertDescription>
-                        You do not need to paste a webhook URL. The scheduler calls <code>/api/webhooks/social-share</code>, then this app posts to the official platform API from the server.
-                      </AlertDescription>
-                    </Alert>
+                        <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+                          <p className="font-medium text-foreground">Required LinkedIn app redirect URL</p>
+                          <code className="mt-2 block break-all rounded-md bg-background p-2 text-xs text-foreground">
+                            {typeof window === 'undefined' ? '/api/auth/linkedin/callback' : `${window.location.origin}/api/auth/linkedin/callback`}
+                          </code>
+                          <p className="mt-2">Add this exact URL in your LinkedIn Developer Portal OAuth 2.0 redirect URLs.</p>
+                        </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">{getDestinationLabel(apiEditor.platform)}</label>
-                      <Input value={apiEditor.accountId} onChange={(event) => setApiEditor({ ...apiEditor, accountId: event.target.value })} placeholder={getDestinationPlaceholder(apiEditor.platform)} required={isDestinationRequired(apiEditor.platform)} />
-                    </div>
+                        <Button type="button" asChild>
+                          <a href="/api/auth/linkedin/start">Connect LinkedIn OAuth</a>
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Connection label</label>
+                          <Input value={apiEditor.label} onChange={(event) => setApiEditor({ ...apiEditor, label: event.target.value })} placeholder="Portfolio Facebook Page, Instagram Business account, Project X account, etc." />
+                        </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">{getTokenLabel(apiEditor.platform)}</label>
-                      <Input type="password" value={apiEditor.apiToken} onChange={(event) => setApiEditor({ ...apiEditor, apiToken: event.target.value })} placeholder={getTokenPlaceholder(apiEditor.platform)} />
-                      <p className="text-xs text-muted-foreground">Tokens are stored in Supabase and only used by the Next.js server route. Do not call social APIs from the browser.</p>
-                    </div>
+                        <Alert>
+                          <AlertTitle>Endpoint is handled by Next.js</AlertTitle>
+                          <AlertDescription>
+                            You do not need to paste a webhook URL. The scheduler calls <code>/api/webhooks/social-share</code>, then this app posts to the official platform API from the server.
+                          </AlertDescription>
+                        </Alert>
 
-                    <Button type="submit" disabled={apiConnectionMutation.isPending}>
-                      <Save className="h-4 w-4" /> {apiConnectionMutation.isPending ? 'Saving...' : 'Save platform connection'}
-                    </Button>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">{getDestinationLabel(apiEditor.platform)}</label>
+                          <Input value={apiEditor.accountId} onChange={(event) => setApiEditor({ ...apiEditor, accountId: event.target.value })} placeholder={getDestinationPlaceholder(apiEditor.platform)} required={isDestinationRequired(apiEditor.platform)} />
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">{getTokenLabel(apiEditor.platform)}</label>
+                          <Input type="password" value={apiEditor.apiToken} onChange={(event) => setApiEditor({ ...apiEditor, apiToken: event.target.value })} placeholder={getTokenPlaceholder(apiEditor.platform)} />
+                          <p className="text-xs text-muted-foreground">Tokens are stored in Supabase and only used by the Next.js server route. Do not call social APIs from the browser.</p>
+                        </div>
+
+                        <Button type="submit" disabled={apiConnectionMutation.isPending}>
+                          <Save className="h-4 w-4" /> {apiConnectionMutation.isPending ? 'Saving...' : 'Save platform connection'}
+                        </Button>
+                      </>
+                    )}
                   </form>
                 </CardContent>
               </Card>
