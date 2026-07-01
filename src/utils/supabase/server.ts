@@ -1,24 +1,14 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { assertSupabaseConfigured, isSupabaseConfigured } from './env';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+export { isSupabaseConfigured };
 
-type CookieStore = Awaited<ReturnType<typeof cookies>>;
+export async function createClient() {
+  const cookieStore = await cookies();
+  const { url, publishableKey } = assertSupabaseConfigured();
 
-export const isSupabaseConfigured = Boolean(
-  supabaseUrl &&
-    supabaseKey &&
-    !supabaseUrl.includes('your-project') &&
-    !supabaseKey.includes('your-publishable-key')
-);
-
-export function createClient(cookieStore: CookieStore) {
-  if (!supabaseUrl || !supabaseKey) {
-    throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.');
-  }
-
-  return createServerClient(supabaseUrl, supabaseKey, {
+  return createServerClient(url, publishableKey, {
     cookies: {
       getAll() {
         return cookieStore.getAll();
@@ -27,7 +17,7 @@ export function createClient(cookieStore: CookieStore) {
         try {
           cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
         } catch {
-          // Called from a Server Component. Middleware refreshes sessions, so this can be ignored.
+          // Called from a Server Component. Proxy refreshes sessions, so this can be ignored.
         }
       }
     }

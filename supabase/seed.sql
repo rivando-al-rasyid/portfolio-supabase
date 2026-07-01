@@ -152,6 +152,3 @@ select p.id, c.id from projects p, categories c
 where p.slug = 'vanwallet-api' and c.slug = 'go-backend'
 on conflict do nothing;
 
-insert into social_share_settings (id, auto_share_on_publish, active_platforms, default_message_template)
-values ('default', true, array['facebook','instagram','linkedin','x']::share_platform[], 'New {{type}}: {{title}} {{url}}')
-on conflict (id) do nothing;

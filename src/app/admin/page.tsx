@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { AdminPage } from '../../features/admin/AdminPage';
 import { createClient } from '../../utils/supabase/server';
@@ -10,13 +9,10 @@ export const metadata: Metadata = {
 };
 
 export default async function Page() {
-  const cookieStore = await cookies();
-  const supabase = createClient(cookieStore);
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.getClaims();
 
-  if (!user) {
+  if (error || !data?.claims) {
     redirect('/login');
   }
 

@@ -16,20 +16,6 @@ do $$ begin
 exception when duplicate_object then null;
 end $$;
 
-do $$ begin
-  create type share_platform as enum ('facebook', 'instagram', 'linkedin', 'x');
-exception when duplicate_object then null;
-end $$;
-
-do $$ begin
-  alter type share_platform add value if not exists 'instagram';
-exception when duplicate_object then null;
-end $$;
-
-do $$ begin
-  create type share_status as enum ('pending', 'ready', 'sent', 'failed');
-exception when duplicate_object then null;
-end $$;
 
 create table if not exists blog_posts (
   id uuid primary key default gen_random_uuid(),
@@ -151,41 +137,138 @@ drop table if exists topics cascade;
 
 alter table categories drop column if exists description;
 
-create table if not exists social_share_settings (
-  id text primary key default 'default',
-  auto_share_on_publish boolean not null default true,
-  active_platforms share_platform[] not null default array['facebook','instagram','linkedin','x']::share_platform[],
-  default_message_template text not null default 'New {{type}}: {{title}} {{url}}',
-  updated_at timestamptz not null default now()
-);
+drop table if exists social_api_connections cascade;
+drop table if exists social_share_settings cascade;
+drop table if exists social_share_queue cascade;
+drop type if exists share_platform cascade;
+drop type if exists share_status cascade;
 
-create table if not exists social_api_connections (
+
+-- Queue used by n8n scheduled workflows.
+-- Each row stores only one linked content id and whether it has already been posted.
+drop view if exists public.queue_share_items;
+
+create table if not exists queue_share (
   id uuid primary key default gen_random_uuid(),
-  platform share_platform not null unique,
-  label text,
-  is_enabled boolean not null default true,
-  api_code text,
-  api_token text,
-  api_secret text,
-  account_id text,
-  extra_config jsonb not null default '{}'::jsonb,
+  blog_post_id uuid references blog_posts(id) on delete cascade,
+  project_id uuid references projects(id) on delete cascade,
+  is_posted boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
-create table if not exists social_share_queue (
-  id uuid primary key default gen_random_uuid(),
-  entity_type entity_type not null check (entity_type in ('blog', 'project')),
-  entity_id uuid not null,
-  platform share_platform not null,
-  status share_status not null default 'ready',
-  payload jsonb not null default '{}'::jsonb,
-  scheduled_at timestamptz not null default now(),
-  sent_at timestamptz,
-  error_message text,
-  attempts integer not null default 0,
-  created_at timestamptz not null default now()
-);
+alter table queue_share add column if not exists blog_post_id uuid references blog_posts(id) on delete cascade;
+alter table queue_share add column if not exists project_id uuid references projects(id) on delete cascade;
+alter table queue_share add column if not exists is_posted boolean not null default false;
+alter table queue_share add column if not exists created_at timestamptz not null default now();
+alter table queue_share add column if not exists updated_at timestamptz not null default now();
+
+-- Migrate rows from the older entity_type/entity_id queue shape if those columns still exist.
+do $$ begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'queue_share' and column_name = 'entity_type'
+  ) and exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'queue_share' and column_name = 'entity_id'
+  ) then
+    update public.queue_share
+    set blog_post_id = entity_id
+    where entity_type = 'blog' and blog_post_id is null;
+
+    update public.queue_share
+    set project_id = entity_id
+    where entity_type = 'project' and project_id is null;
+  end if;
+end $$;
+
+delete from public.queue_share where blog_post_id is null and project_id is null;
+
+alter table queue_share drop column if exists entity_type cascade;
+alter table queue_share drop column if exists entity_id cascade;
+alter table queue_share drop column if exists scheduled_at cascade;
+alter table queue_share drop column if exists posted_at cascade;
+alter table queue_share drop column if exists last_error cascade;
+alter table queue_share drop column if exists retry_count cascade;
+
+do $$ begin
+  alter table public.queue_share
+    add constraint queue_share_one_content check (
+      (blog_post_id is not null and project_id is null)
+      or (blog_post_id is null and project_id is not null)
+    );
+exception when duplicate_object then null;
+end $$;
+
+create unique index if not exists idx_queue_share_blog_post_unique
+  on public.queue_share(blog_post_id)
+  where blog_post_id is not null;
+
+create unique index if not exists idx_queue_share_project_unique
+  on public.queue_share(project_id)
+  where project_id is not null;
+
+create or replace function public.enqueue_blog_post_share()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.status = 'published' then
+    insert into public.queue_share (blog_post_id)
+    values (new.id)
+    on conflict (blog_post_id) where blog_post_id is not null do update set
+      updated_at = now();
+  end if;
+
+  return new;
+end;
+$$;
+
+create or replace function public.enqueue_project_share()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.status = 'published' then
+    insert into public.queue_share (project_id)
+    values (new.id)
+    on conflict (project_id) where project_id is not null do update set
+      updated_at = now();
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_enqueue_blog_post_share on public.blog_posts;
+create trigger trg_enqueue_blog_post_share
+after insert or update of status
+on public.blog_posts
+for each row
+execute function public.enqueue_blog_post_share();
+
+drop trigger if exists trg_enqueue_project_share on public.projects;
+create trigger trg_enqueue_project_share
+after insert or update of status
+on public.projects
+for each row
+execute function public.enqueue_project_share();
+
+insert into public.queue_share (blog_post_id)
+select id
+from public.blog_posts
+where status = 'published'
+on conflict (blog_post_id) where blog_post_id is not null do nothing;
+
+insert into public.queue_share (project_id)
+select id
+from public.projects
+where status = 'published'
+on conflict (project_id) where project_id is not null do nothing;
 
 create table if not exists share_events (
   id uuid primary key default gen_random_uuid(),
@@ -217,34 +300,11 @@ create index if not exists idx_project_status on projects(status, updated_at des
 create index if not exists idx_project_featured on projects(is_featured desc, sort_order asc);
 create index if not exists idx_category_slug on categories(slug);
 create index if not exists idx_category_name on categories using gin (to_tsvector('simple', name));
-create index if not exists idx_share_queue_status on social_share_queue(status, scheduled_at);
 create index if not exists idx_share_events_entity on share_events(entity_type, entity_id);
-create index if not exists idx_social_api_platform on social_api_connections(platform);
-
-alter table social_api_connections drop column if exists api_base_url;
-
--- Limit auto-share to the four supported production platforms.
-delete from social_api_connections where platform not in ('facebook', 'instagram', 'linkedin', 'x');
-delete from social_share_queue where platform not in ('facebook', 'instagram', 'linkedin', 'x');
-update social_share_settings
-set active_platforms = array['facebook','instagram','linkedin','x']::share_platform[],
-    updated_at = now()
-where id = 'default';
-
-alter table social_api_connections drop constraint if exists social_api_connections_platform_supported;
-alter table social_api_connections
-  add constraint social_api_connections_platform_supported
-  check (platform = any (array['facebook','instagram','linkedin','x']::share_platform[]));
-
-alter table social_share_queue drop constraint if exists social_share_queue_platform_supported;
-alter table social_share_queue
-  add constraint social_share_queue_platform_supported
-  check (platform = any (array['facebook','instagram','linkedin','x']::share_platform[]));
-
-alter table social_share_settings drop constraint if exists social_share_settings_active_platforms_supported;
-alter table social_share_settings
-  add constraint social_share_settings_active_platforms_supported
-  check (active_platforms <@ array['facebook','instagram','linkedin','x']::share_platform[]);
+create index if not exists idx_queue_share_posted on queue_share(is_posted, created_at);
+create index if not exists idx_queue_share_blog_post on queue_share(blog_post_id);
+create index if not exists idx_queue_share_project on queue_share(project_id);
+-- Old social posting config tables/types are dropped. queue_share is kept as the simple n8n queue.
 
 alter table blog_posts enable row level security;
 alter table projects enable row level security;
@@ -252,10 +312,8 @@ alter table categories enable row level security;
 alter table site_settings enable row level security;
 alter table blog_post_categories enable row level security;
 alter table project_categories enable row level security;
-alter table social_share_settings enable row level security;
-alter table social_api_connections enable row level security;
-alter table social_share_queue enable row level security;
 alter table share_events enable row level security;
+alter table queue_share enable row level security;
 
 -- Content read/write policies
 drop policy if exists "Public can read published blog posts" on blog_posts;
@@ -302,25 +360,14 @@ drop policy if exists "Authenticated can manage project category links" on proje
 create policy "Authenticated can manage project category links" on project_categories
   for all to authenticated using (true) with check (true);
 
--- Share settings are public-readable because the frontend only needs toggles/templates; API secrets are never public-readable.
-drop policy if exists "Public can read share settings" on social_share_settings;
-create policy "Public can read share settings" on social_share_settings for select using (true);
 
-drop policy if exists "Authenticated can manage share settings" on social_share_settings;
-create policy "Authenticated can manage share settings" on social_share_settings
+drop policy if exists "Authenticated can manage queue share" on queue_share;
+create policy "Authenticated can manage queue share" on queue_share
   for all to authenticated using (true) with check (true);
 
-drop policy if exists "Authenticated can manage social API connections" on social_api_connections;
-create policy "Authenticated can manage social API connections" on social_api_connections
-  for all to authenticated using (true) with check (true);
-
-drop policy if exists "Authenticated can manage share queue" on social_share_queue;
-create policy "Authenticated can manage share queue" on social_share_queue
-  for all to authenticated using (true) with check (true);
-
-drop policy if exists "Authenticated can read share queue" on social_share_queue;
-create policy "Authenticated can read share queue" on social_share_queue
-  for select to authenticated using (true);
+-- The admin queue page reads queue_share_items through the logged-in Supabase session.
+-- n8n should connect to Supabase directly on its own schedule, read queue_share_items where
+-- is_posted = false and status = 'published', then update queue_share.is_posted to true.
 
 drop policy if exists "Public can insert share events" on share_events;
 create policy "Public can insert share events" on share_events
@@ -351,6 +398,3 @@ insert into site_settings (id)
 values ('default')
 on conflict (id) do nothing;
 
-insert into social_share_settings (id, auto_share_on_publish, active_platforms, default_message_template)
-values ('default', true, array['facebook','instagram','linkedin','x']::share_platform[], 'New {{type}}: {{title}} {{url}}')
-on conflict (id) do nothing;

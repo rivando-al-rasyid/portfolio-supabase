@@ -1,23 +1,11 @@
-import { supabase } from './supabase';
+import { isSupabaseConfigured, supabase } from './supabase';
 import { mockBlogPosts, mockCategories, mockProjects, mockSiteSettings } from './mockData';
 import { fetchGitHubReadmeFromRepo, fetchMarkdownFromUrl } from './contentImport';
 import { toSlug } from './utils';
-import type {
-  BlogPost,
-  Category,
-  EntityType,
-  Project,
-  SharePlatform,
-  ShareSettings,
-  SiteSettings,
-  SocialApiConnection,
-  SocialShareQueueItem
-} from '../types/content';
+import type { BlogPost, Category, EntityType, Project, QueueShareItem, SiteSettings } from '../types/content';
 
 const blogSelect = '*, blog_post_categories(categories(*))';
 const projectSelect = '*, project_categories(categories(*))';
-
-const supportedAutoSharePlatforms: SharePlatform[] = ['facebook', 'instagram', 'linkedin', 'x'];
 
 interface CategoryJoinRow {
   categories: Category | null;
@@ -51,6 +39,11 @@ function mapProject(row: ProjectRow): Project {
     sort_order: row.sort_order ?? 100,
     categories: row.project_categories?.map((item) => item.categories).filter(Boolean) as Category[] | undefined
   };
+}
+
+
+function shouldUseMockData() {
+  return !isSupabaseConfigured;
 }
 
 function uniqueCategoryNames(names: string[]) {
@@ -109,6 +102,7 @@ async function resolveProjectContent(project: Project): Promise<Project> {
 }
 
 export async function getSiteSettings() {
+  if (shouldUseMockData()) return mockSiteSettings;
   const { data, error } = await supabase.from('site_settings').select('*').eq('id', 'default').maybeSingle();
   if (error || !data) {
     if (error) console.warn('Using mock site settings because Supabase returned:', error.message);
@@ -132,6 +126,7 @@ export async function updateSiteSettings(payload: Omit<SiteSettings, 'id' | 'upd
 }
 
 export async function getPublishedBlogPosts() {
+  if (shouldUseMockData()) return mockBlogPosts;
   const { data, error } = await supabase
     .from('blog_posts')
     .select(blogSelect)
@@ -149,6 +144,7 @@ export async function getPublishedBlogPosts() {
 }
 
 export async function getAllBlogPosts() {
+  if (shouldUseMockData()) return mockBlogPosts;
   const { data, error } = await supabase
     .from('blog_posts')
     .select(blogSelect)
@@ -160,6 +156,7 @@ export async function getAllBlogPosts() {
 }
 
 export async function getBlogPostBySlug(slug: string) {
+  if (shouldUseMockData()) return mockBlogPosts.find((post) => post.slug === slug) ?? null;
   const { data, error } = await supabase.from('blog_posts').select(blogSelect).eq('slug', slug).maybeSingle();
 
   if (error) {
@@ -171,6 +168,7 @@ export async function getBlogPostBySlug(slug: string) {
 }
 
 export async function getPublishedProjects() {
+  if (shouldUseMockData()) return mockProjects;
   const { data, error } = await supabase
     .from('projects')
     .select(projectSelect)
@@ -188,6 +186,7 @@ export async function getPublishedProjects() {
 }
 
 export async function getAllProjects() {
+  if (shouldUseMockData()) return mockProjects;
   const { data, error } = await supabase
     .from('projects')
     .select(projectSelect)
@@ -199,6 +198,7 @@ export async function getAllProjects() {
 }
 
 export async function getProjectBySlug(slug: string) {
+  if (shouldUseMockData()) return mockProjects.find((project) => project.slug === slug) ?? null;
   const { data, error } = await supabase.from('projects').select(projectSelect).eq('slug', slug).maybeSingle();
 
   if (error) {
@@ -209,7 +209,57 @@ export async function getProjectBySlug(slug: string) {
   return data ? resolveProjectContent(mapProject(data as ProjectRow)) : mockProjects.find((project) => project.slug === slug) ?? null;
 }
 
+
+export async function getQueueShareItems() {
+  if (shouldUseMockData()) return [] as QueueShareItem[];
+
+  const { data, error } = await supabase
+    .from('queue_share')
+    .select('id, blog_post_id, project_id, is_posted, created_at, updated_at, blog_post:blog_posts(id, title, slug, status), project:projects(id, title, slug, status)')
+    .order('is_posted', { ascending: true })
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+
+  type QueueShareRow = {
+    id: string;
+    blog_post_id: string | null;
+    project_id: string | null;
+    is_posted: boolean;
+    created_at: string;
+    updated_at: string;
+    blog_post?: RelationContent | RelationContent[] | null;
+    project?: RelationContent | RelationContent[] | null;
+  };
+
+  type RelationContent = { id: string; title: string | null; slug: string | null; status: QueueShareItem['status'] };
+
+  function firstRelation(value: RelationContent | RelationContent[] | null | undefined) {
+    return Array.isArray(value) ? value[0] ?? null : value ?? null;
+  }
+
+  return ((data ?? []) as unknown as QueueShareRow[]).map((item) => {
+    const contentType: Extract<EntityType, 'blog' | 'project'> = item.blog_post_id ? 'blog' : 'project';
+    const content = firstRelation(contentType === 'blog' ? item.blog_post : item.project);
+
+    return {
+      id: item.id,
+      blog_post_id: item.blog_post_id,
+      project_id: item.project_id,
+      content_id: item.blog_post_id ?? item.project_id,
+      content_type: contentType,
+      is_posted: item.is_posted,
+      created_at: item.created_at,
+      updated_at: item.updated_at,
+      title: content?.title ?? null,
+      slug: content?.slug ?? null,
+      status: content?.status ?? null
+    };
+  });
+}
+
 export async function getCategories() {
+  if (shouldUseMockData()) return mockCategories;
   const { data, error } = await supabase.from('categories').select('*').order('name');
   if (error) {
     console.warn('Using mock categories because Supabase returned:', error.message);
@@ -332,104 +382,6 @@ export async function updateCategory(id: string, payload: Partial<Category>) {
 export async function deleteCategory(id: string) {
   const { error } = await supabase.from('categories').delete().eq('id', id);
   if (error) throw error;
-}
-
-export async function getShareSettings() {
-  const { data, error } = await supabase.from('social_share_settings').select('*').eq('id', 'default').maybeSingle();
-  if (error || !data) {
-    return {
-      id: 'default',
-      auto_share_on_publish: true,
-      active_platforms: supportedAutoSharePlatforms,
-      default_message_template: 'New {{type}}: {{title}} {{url}}',
-      updated_at: new Date().toISOString()
-    } satisfies ShareSettings;
-  }
-  return {
-    ...(data as ShareSettings),
-    active_platforms: ((data.active_platforms ?? []) as SharePlatform[]).filter((platform) => supportedAutoSharePlatforms.includes(platform))
-  } satisfies ShareSettings;
-}
-
-export async function updateShareSettings(payload: Pick<ShareSettings, 'auto_share_on_publish' | 'active_platforms' | 'default_message_template'>) {
-  const { data, error } = await supabase
-    .from('social_share_settings')
-    .upsert({
-      id: 'default',
-      ...payload,
-      active_platforms: payload.active_platforms.filter((platform) => supportedAutoSharePlatforms.includes(platform)),
-      updated_at: new Date().toISOString()
-    })
-    .select('*')
-    .single();
-  if (error) throw error;
-  return data as ShareSettings;
-}
-
-export async function getSocialApiConnections() {
-  const { data, error } = await supabase.from('social_api_connections').select('*').order('platform');
-  if (error) {
-    console.warn('Cannot load social API connections:', error.message);
-    return [] as SocialApiConnection[];
-  }
-  return data as SocialApiConnection[];
-}
-
-export async function upsertSocialApiConnection(
-  payload: Pick<SocialApiConnection, 'platform' | 'label' | 'is_enabled' | 'api_code' | 'api_token' | 'api_secret' | 'account_id' | 'extra_config'>
-) {
-  const { data, error } = await supabase
-    .from('social_api_connections')
-    .upsert({ ...payload, updated_at: new Date().toISOString() }, { onConflict: 'platform' })
-    .select('*')
-    .single();
-  if (error) throw error;
-  return data as SocialApiConnection;
-}
-
-export async function getShareQueue() {
-  const { data, error } = await supabase
-    .from('social_share_queue')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(50);
-  if (error) {
-    console.warn('Cannot load share queue:', error.message);
-    return [] as SocialShareQueueItem[];
-  }
-  return data as SocialShareQueueItem[];
-}
-
-export async function enqueueShareJobs(input: {
-  entityType: Extract<EntityType, 'blog' | 'project'>;
-  entityId: string;
-  platforms: SharePlatform[];
-  payload: Record<string, unknown>;
-}) {
-  const platforms = input.platforms.filter((platform) => supportedAutoSharePlatforms.includes(platform));
-  if (!platforms.length) return;
-  const rows = platforms.map((platform) => ({
-    entity_type: input.entityType,
-    entity_id: input.entityId,
-    platform,
-    status: 'ready',
-    payload: input.payload,
-    scheduled_at: new Date().toISOString()
-  }));
-
-  const { error } = await supabase.from('social_share_queue').insert(rows);
-  if (error) console.warn('Share queue insert failed:', error.message);
-}
-
-export async function runSocialShareProcessor() {
-  const response = await fetch('/api/webhooks/social-share', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ limit: 10 })
-  });
-
-  if (!response.ok) throw new Error(await response.text());
-  return (await response.json()) as { processed?: number; failed?: number; message?: string };
 }
 
 export async function trackShareEvent(input: {

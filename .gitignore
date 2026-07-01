@@ -2,6 +2,7 @@ node_modules
 .next
 out
 dist
-.DS_Store
-.env.example
+.env*.local
 .env
+.DS_Store
+tsconfig.tsbuildinfo

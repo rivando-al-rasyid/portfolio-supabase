@@ -48,7 +48,7 @@ export function LoginPage() {
           {!isSupabaseConfigured ? (
             <Alert className="mb-4 border-destructive/30 bg-destructive/10">
               <AlertTitle>Supabase env is missing</AlertTitle>
-              <AlertDescription>Fill NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in .env.local.</AlertDescription>
+              <AlertDescription>Connect Supabase in Vercel Marketplace, then run `vercel env pull .env.development.local`, or set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY manually.</AlertDescription>
             </Alert>
           ) : null}
 

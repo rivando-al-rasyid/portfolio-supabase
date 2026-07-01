@@ -1,143 +1,58 @@
-# Portfolio Supabase — Next.js CMS
+# Portfolio Supabase Next.js
 
-A modern personal portfolio and CMS built with **Next.js App Router**, React, Tailwind CSS 4, and Supabase.
+Next.js portfolio CMS using Supabase Auth, Supabase Database/Storage, and Vercel deployment.
 
-It includes a public portfolio, blog, project showcase, lightweight knowledge graph, protected admin CMS, project README import, blog Markdown import, searchable categories, and server-side social auto-share webhooks.
+## What changed for the current Vercel + Supabase integration
 
-## Stack
+- Uses the current Supabase publishable key env variable: `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
+- Keeps a legacy fallback for `NEXT_PUBLIC_SUPABASE_ANON_KEY`, but new Supabase projects should use publishable keys.
+- Uses `@supabase/ssr` clients for browser, server, and request-session refresh.
+- Uses the Next.js 16 `src/proxy.ts` file convention for request-session refresh; no legacy `middleware.ts` file is included.
+- Removes the old build-time mock-data shortcut. If Supabase env vars exist, the build reads from Supabase instead of silently building mock portfolio content.
+- Pins `@supabase/ssr` and `@vercel/analytics` instead of using `latest`, so Vercel builds are reproducible.
 
-- Next.js App Router
-- React 19
-- Tailwind CSS 4
-- Supabase Auth, Postgres, Storage
-- TanStack Query for admin CMS data
-- Server-side API routes for webhooks / social share processing
+## Vercel setup
 
-## Environment
+1. Import this repository into Vercel.
+2. Open the Vercel project, then install/connect **Supabase** from Vercel Marketplace.
+3. Connect the Supabase project to this Vercel project.
+4. Confirm these variables exist in Vercel Project Settings → Environment Variables:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+   - `SUPABASE_URL`
+   - `SUPABASE_PUBLISHABLE_KEY`
+   - `SUPABASE_SECRET_KEY`
+   - `POSTGRES_URL`
+5. Redeploy after the integration is connected. Vercel environment variable changes only apply to new deployments.
 
-Create `.env.local`:
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
-NEXT_PUBLIC_SITE_URL=http://localhost:3000
-
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-SOCIAL_SHARE_WEBHOOK_SECRET=change-this-secret
-```
-
-`SUPABASE_SERVICE_ROLE_KEY` is server-only. Do not expose it to the browser.
-
-## Run locally
+## Local setup with Vercel-managed env vars
 
 ```bash
 npm install
+npx vercel login
+npx vercel link
+npx vercel env pull .env.development.local
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Do not commit `.env.development.local` or `.env.local`.
 
-## Database
+## Supabase database setup
 
-Run `supabase/schema.sql`, then optionally run `supabase/seed.sql`.
+Run the schema and seed files in the Supabase SQL Editor:
 
-Main CMS tables:
-
-- `blog_posts`
-- `projects`
-- `categories`
-- `blog_post_categories`
-- `project_categories`
-- `site_settings`
-- `social_api_connections`
-- `social_share_settings`
-- `social_share_queue`
-- `share_events`
-
-Categories are reused by slug. When you save a blog/project and type a category that does not exist, the CMS creates it. If it exists, the same row is reused.
-
-## Content import rules
-
-### Project
-
-Projects can import README content from a GitHub repository URL or README URL, for example:
-
-- `https://github.com/rivando-al-rasyid/portfolio-supabase`
-- `https://github.com/rivando-al-rasyid/portfolio-supabase/blob/main/README.md`
-
-Projects can also import a local `.md` / `.markdown` file.
-
-### Blog
-
-Blog import uses only a local `.md` / `.markdown` file. README import is intentionally project-only.
-
-Supported frontmatter example:
-
-```md
----
-title: My Project
-excerpt: Short summary
-categories: [Next.js, Supabase]
-cover_image: https://example.com/cover.png
-repo_url: https://github.com/user/repo
-demo_url: https://example.com
-status: published
-featured: true
-sort_order: 10
----
-
-# Content here
+```sql
+-- first run supabase/schema.sql
+-- then run supabase/seed.sql
 ```
 
-## Auto-share webhooks
+Create an admin user in Supabase Auth, then use that email/password on `/login`.
 
-The browser does not post directly to social APIs. Publishing content creates queue rows. Server-side Next.js API routes process the queue.
-
-Endpoints:
-
-- `POST /api/webhooks/social-share` — process queued jobs.
-- `POST /api/webhooks/content-published` — optional endpoint for external publish events to enqueue jobs.
-
-Example:
+## Scripts
 
 ```bash
-curl -X POST https://your-domain.com/api/webhooks/social-share \
-  -H "content-type: application/json" \
-  -H "x-webhook-secret: change-this-secret" \
-  -d '{"limit":10}'
+npm run dev
+npm run build
+npm start
+npm run lint
 ```
-
-Read `docs/social-auto-share-requirements.md` for details.
-
-## Supabase SSR session setup
-
-This Next.js version uses `@supabase/ssr` for browser/server auth session handling.
-
-Added files:
-
-- `src/utils/supabase/client.ts` — browser Supabase client.
-- `src/utils/supabase/server.ts` — server component Supabase client using `next/headers` cookies.
-- `src/utils/supabase/middleware.ts` — refreshes sessions and writes updated cookies.
-- `src/middleware.ts` — applies the Supabase middleware to application routes.
-
-Install dependencies:
-
-```bash
-npm install @supabase/supabase-js @supabase/ssr
-```
-
-Local env:
-
-```bash
-NEXT_PUBLIC_SUPABASE_URL=https://vvsuyntqnehrrrsnnlgo.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_6zFE4f7hcoejgByjC4Wqjw_pRZ3KQ7O
-```
-
-For auto-share webhooks, also set these server-only values in Vercel or `.env.local`:
-
-```bash
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-SOCIAL_SHARE_WEBHOOK_SECRET=change-this-secret
-```
-
-Do not expose `SUPABASE_SERVICE_ROLE_KEY` in client code.
