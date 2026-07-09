@@ -1,41 +1,26 @@
 # Portfolio Supabase Next.js
 
-Next.js portfolio CMS using Supabase Auth, Supabase Database/Storage, and Vercel deployment.
+Next.js portfolio CMS using Supabase Auth and Supabase Database/Storage. Runs as a
+self-hosted Node server (Docker-ready) — no platform-specific deployment required.
 
-## What changed for the current Vercel + Supabase integration
+## Stack notes
 
 - Uses the current Supabase publishable key env variable: `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
 - Keeps a legacy fallback for `NEXT_PUBLIC_SUPABASE_ANON_KEY`, but new Supabase projects should use publishable keys.
 - Uses `@supabase/ssr` clients for browser, server, and request-session refresh.
 - Uses the Next.js 16 `src/proxy.ts` file convention for request-session refresh; no legacy `middleware.ts` file is included.
-- Removes the old build-time mock-data shortcut. If Supabase env vars exist, the build reads from Supabase instead of silently building mock portfolio content.
-- Pins `@supabase/ssr` and `@vercel/analytics` instead of using `latest`, so Vercel builds are reproducible.
+- If Supabase env vars exist, the app reads from Supabase; otherwise the Supabase-dependent pages will show a "missing env" state.
 
-## Vercel setup
-
-1. Import this repository into Vercel.
-2. Open the Vercel project, then install/connect **Supabase** from Vercel Marketplace.
-3. Connect the Supabase project to this Vercel project.
-4. Confirm these variables exist in Vercel Project Settings → Environment Variables:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-   - `SUPABASE_URL`
-   - `SUPABASE_PUBLISHABLE_KEY`
-   - `SUPABASE_SECRET_KEY`
-   - `POSTGRES_URL`
-5. Redeploy after the integration is connected. Vercel environment variable changes only apply to new deployments.
-
-## Local setup with Vercel-managed env vars
+## Local setup
 
 ```bash
 npm install
-npx vercel login
-npx vercel link
-npx vercel env pull .env.development.local
+cp .env.example .env.local
+# then fill in NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 npm run dev
 ```
 
-Do not commit `.env.development.local` or `.env.local`.
+Do not commit `.env.local`.
 
 ## Supabase database setup
 
@@ -47,6 +32,29 @@ Run the schema and seed files in the Supabase SQL Editor:
 ```
 
 Create an admin user in Supabase Auth, then use that email/password on `/login`.
+
+## Running on your own server
+
+### Option A: plain Node
+
+```bash
+npm install
+npm run build
+npm start
+```
+
+`npm start` runs `next start`, which listens on port 3000 by default (`PORT` env var to override).
+
+### Option B: Docker
+
+```bash
+docker build -t portfolio .
+docker run -p 3000:3000 --env-file .env.local portfolio
+```
+
+The included `Dockerfile` uses `next build`'s standalone output, so the final image only
+contains the compiled app and `node_modules` it actually needs at runtime — no dev
+dependencies, no source maps beyond what Next.js includes by default.
 
 ## Scripts
 

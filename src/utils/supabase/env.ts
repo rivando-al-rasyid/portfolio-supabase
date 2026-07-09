@@ -20,7 +20,7 @@ export const isSupabaseConfigured = Boolean(
 export function assertSupabaseConfigured() {
   if (!isSupabaseConfigured) {
     throw new Error(
-      'Missing Supabase environment variables. Connect Supabase from Vercel Marketplace or set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.'
+      'Missing Supabase environment variables. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in your environment (e.g. .env.local).'
     );
   }
 

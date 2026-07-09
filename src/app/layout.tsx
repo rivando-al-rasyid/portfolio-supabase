@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
-import { Analytics } from '@vercel/analytics/next';
 import { ExternalLink, GitBranch, Mail } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { Providers } from './providers';
@@ -40,7 +39,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               </div>
             </footer>
           </div>
-          <Analytics />
         </Providers>
       </body>
     </html>
