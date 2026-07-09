@@ -3,9 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Moon, Network, Shield, Sun } from "lucide-react";
+import { Moon, Network, Sun } from "lucide-react";
 import { Button } from "./ui/button";
-import { useAuth } from "../features/auth/AuthProvider";
 import { cn } from "../lib/utils";
 
 const links = [
@@ -21,7 +20,6 @@ function isActivePath(pathname: string, href: string) {
 }
 
 export function Navbar() {
-  const { user } = useAuth();
   const pathname = usePathname();
   const [dark, setDark] = useState(false);
 
@@ -70,11 +68,6 @@ export function Navbar() {
           >
             {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
-          <Button
-            asChild
-            variant={user ? "secondary" : "outline"}
-            size="sm"
-          ></Button>
         </div>
       </div>
       <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4 pb-3 md:hidden">

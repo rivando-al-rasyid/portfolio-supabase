@@ -28,6 +28,5 @@ function getBrowserClient() {
 
 export { isSupabaseConfigured };
 
-// Client bundle: uses @supabase/ssr so auth cookies stay in sync with Next proxy.
-// Server bundle: uses an anon, stateless Supabase client for public CMS reads.
+// Both client and server bundles use a plain, anon Supabase client for public reads.
 export const supabase = typeof window === 'undefined' ? createPublicServerClient() : getBrowserClient();
